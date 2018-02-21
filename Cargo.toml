@@ -1,0 +1,9 @@
+[package]
+name = "mppc"
+version = "0.1.0"
+authors = ["Benjamin Thomas (Aviansie Ben) <ben@benthomas.ca>"]
+
+[dependencies]
+clap = "2.29.2"
+plex = { path = "plex" }
+itertools = "0.7.3"
