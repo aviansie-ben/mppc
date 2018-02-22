@@ -59,8 +59,8 @@ pub enum Token {
 
     CId(String),
     Id(String),
-    RVal(String),
-    IVal(String),
+    RVal(f64),
+    IVal(i32),
     BVal(bool),
     CVal(char),
 
@@ -280,8 +280,16 @@ lexer! {
 
     r#"#[a-zA-Z0-9_]*"# => (Token::CId(text[1..].to_owned()), text),
     r#"[a-zA-Z][a-zA-Z0-9_]*"# => (Token::Id(text.to_owned()), text),
-    r#"[0-9]+\.[0-9]+"# => (Token::RVal(text.to_owned()), text),
-    r#"[0-9]+"# => (Token::IVal(text.to_owned()), text),
+    r#"[0-9]+\.[0-9]+"# => if let Result::Ok(val) = text.parse::<f64>() {
+        (Token::RVal(val), text)
+    } else {
+        (Token::Error("invalid real literal".to_string()), text)
+    },
+    r#"[0-9]+"# => if let Result::Ok(val) = text.parse::<i32>() {
+        (Token::IVal(val), text)
+    } else {
+        (Token::Error("invalid integer literal".to_string()), text)
+    },
     r#"true"# => (Token::BVal(true), text),
     r#"false"# => (Token::BVal(false), text),
     r#""[^"\n\\]""# => (Token::CVal(text.chars().skip(1).next().unwrap()), text),

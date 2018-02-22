@@ -191,7 +191,7 @@ fn parse_command<'a>(args: &ArgMatches<'a>) {
     print_errors(&mut errors);
 
     if errors.is_empty() {
-        println!("{}", parse_result.unwrap());
+        println!("{:?}", parse_result.unwrap());
     }
 }
 
