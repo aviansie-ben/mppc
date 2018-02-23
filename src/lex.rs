@@ -203,22 +203,54 @@ macro_rules! match_peek_token {
     }}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pos {
     pub line: usize,
     pub col: usize
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+impl Pos {
+    pub fn dummy() -> Pos {
+        Pos { line: usize::max_value(), col: usize::max_value() }
+    }
+}
+
+impl fmt::Debug for Pos {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self == &Pos::dummy() {
+            write!(f, "Pos::dummy()")
+        } else {
+            write!(f, "Pos(line {:?}, col {:?})", self.line, self.col)
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Span {
     pub lo: Pos,
     pub hi: Pos
 }
 
-pub fn combine_spans(s1: Span, s2: Span) -> Span {
-    Span {
-        lo: cmp::min(s1.lo, s2.lo),
-        hi: cmp::max(s1.hi, s2.hi)
+impl Span {
+    pub fn dummy() -> Span {
+        Span { lo: Pos::dummy(), hi: Pos::dummy() }
+    }
+
+    pub fn combine(s1: Span, s2: Span) -> Span {
+        Span {
+            lo: cmp::min(s1.lo, s2.lo),
+            hi: cmp::max(s1.hi, s2.hi)
+        }
+    }
+}
+
+impl fmt::Debug for Span {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self == &Span::dummy() {
+            write!(f, "Span::dummy()")
+        } else {
+            write!(f, "Span({:?}, {:?})", self.lo, self.hi)
+        }
     }
 }
 

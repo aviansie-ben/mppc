@@ -1,3 +1,5 @@
+use lex::Span;
+
 #[derive(Debug, Clone)]
 pub struct Block {
     pub decls: Vec<Decl>,
@@ -16,18 +18,24 @@ pub enum Type {
     Real,
     Bool,
     Char,
-    Id(String)
+    Id(String, Span)
 }
 
 #[derive(Debug, Clone)]
 pub struct VarSpec {
     pub id: String,
-    pub dims: Vec<Expr>
+    pub dims: Vec<Expr>,
+    pub span: Span
 }
 
 impl VarSpec {
     pub fn new(id: String, dims: Vec<Expr>) -> VarSpec {
-        VarSpec { id: id, dims: dims }
+        VarSpec { id: id, dims: dims, span: Span::dummy() }
+    }
+
+    pub fn at(mut self, span: Span) -> VarSpec {
+        self.span = span;
+        self
     }
 }
 
@@ -35,12 +43,18 @@ impl VarSpec {
 pub struct FunParam {
     pub id: String,
     pub val_type: Type,
-    pub dims: u32
+    pub dims: u32,
+    pub span: Span
 }
 
 impl FunParam {
     pub fn new(id: String, val_type: Type, dims: u32) -> FunParam {
-        FunParam { id: id, val_type: val_type, dims: dims }
+        FunParam { id: id, val_type: val_type, dims: dims, span: Span::dummy() }
+    }
+
+    pub fn at(mut self, span: Span) -> FunParam {
+        self.span = span;
+        self
     }
 }
 
@@ -59,12 +73,18 @@ impl FunSig {
 #[derive(Debug, Clone)]
 pub struct DataCons {
     pub cid: String,
-    pub types: Vec<Type>
+    pub types: Vec<Type>,
+    pub span: Span
 }
 
 impl DataCons {
     pub fn new(cid: String, types: Vec<Type>) -> DataCons {
-        DataCons { cid: cid, types: types }
+        DataCons { cid: cid, types: types, span: Span::dummy() }
+    }
+
+    pub fn at(mut self, span: Span) -> DataCons {
+        self.span = span;
+        self
     }
 }
 
@@ -77,12 +97,13 @@ pub enum DeclType {
 
 #[derive(Debug, Clone)]
 pub struct Decl {
-    pub node: DeclType
+    pub node: DeclType,
+    pub span: Span
 }
 
 impl Decl {
     pub fn new(node: DeclType) -> Decl {
-        Decl { node: node }
+        Decl { node: node, span: Span::dummy() }
     }
 
     pub fn var(specs: Vec<VarSpec>, val_type: Type) -> Decl {
@@ -95,6 +116,11 @@ impl Decl {
 
     pub fn data(name: String, ctors: Vec<DataCons>) -> Decl {
         Decl::new(DeclType::Data(name, ctors))
+    }
+
+    pub fn at(mut self, span: Span) -> Decl {
+        self.span = span;
+        self
     }
 }
 
@@ -129,12 +155,13 @@ pub enum ExprType {
 
 #[derive(Debug, Clone)]
 pub struct Expr {
-    pub node: ExprType
+    pub node: ExprType,
+    pub span: Span
 }
 
 impl Expr {
     pub fn new(node: ExprType) -> Expr {
-        Expr { node: node }
+        Expr { node: node, span: Span::dummy() }
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {
@@ -236,18 +263,29 @@ impl Expr {
     pub fn negate(val: Expr) -> Expr {
         Expr::new(ExprType::Neg(Box::new(val)))
     }
+
+    pub fn at(mut self, span: Span) -> Expr {
+        self.span = span;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Case {
     pub cid: String,
-    pub vars: Vec<String>,
-    pub stmt: Stmt
+    pub vars: Vec<(String, Span)>,
+    pub stmt: Stmt,
+    pub span: Span
 }
 
 impl Case {
-    pub fn new(cid: String, vars: Vec<String>, stmt: Stmt) -> Case {
-        Case { cid: cid, vars: vars, stmt: stmt }
+    pub fn new(cid: String, vars: Vec<(String, Span)>, stmt: Stmt) -> Case {
+        Case { cid: cid, vars: vars, stmt: stmt, span: Span::dummy() }
+    }
+
+    pub fn at(mut self, span: Span) -> Case {
+        self.span = span;
+        self
     }
 }
 
@@ -265,12 +303,13 @@ pub enum StmtType {
 
 #[derive(Debug, Clone)]
 pub struct Stmt {
-    pub node: StmtType
+    pub node: StmtType,
+    pub span: Span
 }
 
 impl Stmt {
     pub fn new(node: StmtType) -> Stmt {
-        Stmt { node: node }
+        Stmt { node: node, span: Span::dummy() }
     }
 
     pub fn if_then_else(cond: Expr, true_stmt: Stmt, false_stmt: Stmt) -> Stmt {
@@ -303,5 +342,10 @@ impl Stmt {
 
     pub fn return_value(val: Expr) -> Stmt {
         Stmt::new(StmtType::Return(val))
+    }
+
+    pub fn at(mut self, span: Span) -> Stmt {
+        self.span = span;
+        self
     }
 }

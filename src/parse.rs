@@ -1,7 +1,6 @@
 #![allow(unused_mut)]
 
 use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, Stmt, Type, VarSpec};
-use lex;
 use lex::{Span, Token, TokenStream};
 
 type Error = (String, Span);
@@ -9,10 +8,18 @@ type Error = (String, Span);
 parser! {
     fn _parse(Token, Span);
 
-    (a, b) { lex::combine_spans(a, b) }
+    (a, b) { Span::combine(a, b) }
 
     block: Block {
         decls[ds] stmts[ss] => Block::new(ds, ss)
+    }
+
+    id_with_span: (String, Span) {
+        Id(id) => (id, span!())
+    }
+
+    cid_with_span: (String, Span) {
+        CId(cid) => (cid, span!())
     }
 
     decls: Vec<Decl> {
@@ -24,13 +31,13 @@ parser! {
     }
 
     decl: Decl {
-        Var var_specs[vss] Colon type_[t] => Decl::var(vss, t),
-        Fun Id(id) LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => Decl::func(
+        Var var_specs[vss] Colon type_[t] => Decl::var(vss, t).at(span!()),
+        Fun id_with_span[(id, span)] LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => Decl::func(
             id,
             FunSig::new(ps, rt),
             Block::new(ds, body)
-        ),
-        Data Id(id) Equal cons_decls[cs] => Decl::data(id, cs)
+        ).at(span),
+        Data id_with_span[(id, span)] Equal cons_decls[cs] => Decl::data(id, cs).at(span)
     }
 
     type_: Type {
@@ -38,7 +45,7 @@ parser! {
         Real => Type::Real,
         Bool => Type::Bool,
         Char => Type::Char,
-        Id(id) => Type::Id(id)
+        id_with_span[(id, span)] => Type::Id(id, span)
     }
 
     var_specs: Vec<VarSpec> {
@@ -50,7 +57,7 @@ parser! {
     }
 
     var_spec: VarSpec {
-        Id(id) => VarSpec::new(id, vec![]),
+        id_with_span[(id, span)] => VarSpec::new(id, vec![]).at(span),
         var_spec[mut vs] SLPar expr[e] SRPar => {
             vs.dims.push(e);
             vs
@@ -67,7 +74,7 @@ parser! {
     }
 
     param: FunParam {
-        Id(id) param_dims[dims] Colon type_[t] => FunParam::new(id, t, dims)
+        id_with_span[(id, span)] param_dims[dims] Colon type_[t] => FunParam::new(id, t, dims).at(span)
     }
 
     param_dims: u32 {
@@ -89,13 +96,13 @@ parser! {
     stmt: Stmt {
         If expr[cond] Then stmt[then_stmt] Else stmt[else_stmt] => Stmt::if_then_else(
             cond, then_stmt, else_stmt
-        ),
-        While expr[cond] Do stmt[do_stmt] => Stmt::while_do(cond, do_stmt),
-        Read loc[l] => Stmt::read(l),
-        loc[l] Assign expr[e] => Stmt::assign(l, e),
-        Print expr[val] => Stmt::print(val),
-        CLPar block[b] CRPar => Stmt::block(b),
-        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs)
+        ).at(span!()),
+        While expr[cond] Do stmt[do_stmt] => Stmt::while_do(cond, do_stmt).at(span!()),
+        Read loc[l] => Stmt::read(l).at(span!()),
+        loc[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),
+        Print expr[val] => Stmt::print(val).at(span!()),
+        CLPar block[b] CRPar => Stmt::block(b).at(span!()),
+        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs).at(span!())
     }
 
     stmts: Vec<Stmt> {
@@ -107,13 +114,13 @@ parser! {
     }
 
     loc: Expr {
-        Id(id) => Expr::identifier(id),
-        loc[l] SLPar expr[e] SRPar => Expr::index(l, e)
+        Id(id) => Expr::identifier(id).at(span!()),
+        loc[l] SLPar expr[e] SRPar => Expr::index(l, e).at(span!())
     }
 
     case: Case {
-        CId(cid) Arrow stmt[s] => Case::new(cid, vec![], s),
-        CId(cid) LPar var_list[vs] RPar Arrow stmt[s] => Case::new(cid, vs, s)
+        cid_with_span[(cid, span)] Arrow stmt[s] => Case::new(cid, vec![], s).at(span),
+        cid_with_span[(cid, span)] LPar var_list[vs] RPar Arrow stmt[s] => Case::new(cid, vs, s).at(span)
     }
 
     cases: Vec<Case> {
@@ -124,68 +131,68 @@ parser! {
         }
     }
 
-    var_list: Vec<String> {
-        Id(id) => vec![id],
-        var_list[mut vs] Comma Id(id) => {
-            vs.push(id);
+    var_list: Vec<(String, Span)> {
+        id_with_span[(id, span)] => vec![(id, span)],
+        var_list[mut vs] Comma id_with_span[(id, span)] => {
+            vs.push((id, span));
             vs
         }
     }
 
     expr: Expr {
-        expr[lhs] Or bint_term[rhs] => Expr::or(lhs, rhs),
+        expr[lhs] Or bint_term[rhs] => Expr::or(lhs, rhs).at(span!()),
         bint_term[t] => t
     }
 
     bint_term: Expr {
-        bint_term[lhs] And bint_factor[rhs] => Expr::and(lhs, rhs),
+        bint_term[lhs] And bint_factor[rhs] => Expr::and(lhs, rhs).at(span!()),
         bint_factor[f] => f
     }
 
     bint_factor: Expr {
-        Not bint_factor[f] => Expr::not(f),
-        int_expr[lhs] Equal int_expr[rhs] => Expr::equal_to(lhs, rhs),
-        int_expr[lhs] Lt int_expr[rhs] => Expr::less_than(lhs, rhs),
-        int_expr[lhs] Gt int_expr[rhs] => Expr::greater_than(lhs, rhs),
-        int_expr[lhs] Le int_expr[rhs] => Expr::less_than_or_equal(lhs, rhs),
-        int_expr[lhs] Ge int_expr[rhs] => Expr::greater_than_or_equal(lhs, rhs),
+        Not bint_factor[f] => Expr::not(f).at(span!()),
+        int_expr[lhs] Equal int_expr[rhs] => Expr::equal_to(lhs, rhs).at(span!()),
+        int_expr[lhs] Lt int_expr[rhs] => Expr::less_than(lhs, rhs).at(span!()),
+        int_expr[lhs] Gt int_expr[rhs] => Expr::greater_than(lhs, rhs).at(span!()),
+        int_expr[lhs] Le int_expr[rhs] => Expr::less_than_or_equal(lhs, rhs).at(span!()),
+        int_expr[lhs] Ge int_expr[rhs] => Expr::greater_than_or_equal(lhs, rhs).at(span!()),
         int_expr[e] => e
     }
 
     int_expr: Expr {
-        int_expr[lhs] Add int_term[rhs] => Expr::add(lhs, rhs),
-        int_expr[lhs] Sub int_term[rhs] => Expr::sub(lhs, rhs),
+        int_expr[lhs] Add int_term[rhs] => Expr::add(lhs, rhs).at(span!()),
+        int_expr[lhs] Sub int_term[rhs] => Expr::sub(lhs, rhs).at(span!()),
         int_term[t] => t
     }
 
     int_term: Expr {
-        int_term[lhs] Mul int_factor[rhs] => Expr::mul(lhs, rhs),
-        int_term[lhs] Div int_factor[rhs] => Expr::div(lhs, rhs),
+        int_term[lhs] Mul int_factor[rhs] => Expr::mul(lhs, rhs).at(span!()),
+        int_term[lhs] Div int_factor[rhs] => Expr::div(lhs, rhs).at(span!()),
         int_factor[f] => f
     }
 
     int_factor: Expr {
         LPar expr[e] RPar => e,
-        Size LPar Id(id) param_dims[dims] RPar => Expr::size_of(id, dims),
-        Float LPar expr[e] RPar => Expr::float(e),
-        Floor LPar expr[e] RPar => Expr::floor(e),
-        Ceil LPar expr[e] RPar => Expr::ceil(e),
-        Id(id) LPar arg_list[args] RPar => Expr::call(Expr::identifier(id), args),
-        Id(id) expr_dims[args] => {
-            let mut e = Expr::identifier(id);
+        Size LPar Id(id) param_dims[dims] RPar => Expr::size_of(id, dims).at(span!()),
+        Float LPar expr[e] RPar => Expr::float(e).at(span!()),
+        Floor LPar expr[e] RPar => Expr::floor(e).at(span!()),
+        Ceil LPar expr[e] RPar => Expr::ceil(e).at(span!()),
+        Id(id) LPar arg_list[args] RPar => Expr::call(Expr::identifier(id), args).at(span!()),
+        id_with_span[(id, id_span)] expr_dims[args] => {
+            let mut e = Expr::identifier(id).at(id_span);
 
-            for a in args {
-                e = Expr::index(e, a);
+            for (a, s) in args {
+                e = Expr::index(e, a).at(s);
             };
             e
         },
-        CId(cid) => Expr::cons(cid, vec![]),
-        CId(cid) LPar arg_list[args] RPar => Expr::cons(cid, args),
-        IVal(i) => Expr::int(i),
-        RVal(f) => Expr::real(f),
-        BVal(b) => Expr::bool(b),
-        CVal(c) => Expr::char(c),
-        Sub int_factor[f] => Expr::negate(f)
+        CId(cid) => Expr::cons(cid, vec![]).at(span!()),
+        CId(cid) LPar arg_list[args] RPar => Expr::cons(cid, args).at(span!()),
+        IVal(i) => Expr::int(i).at(span!()),
+        RVal(f) => Expr::real(f).at(span!()),
+        BVal(b) => Expr::bool(b).at(span!()),
+        CVal(c) => Expr::char(c).at(span!()),
+        Sub int_factor[f] => Expr::negate(f).at(span!())
     }
 
     arg_list: Vec<Expr> {
@@ -197,10 +204,10 @@ parser! {
         }
     }
 
-    expr_dims: Vec<Expr> {
+    expr_dims: Vec<(Expr, Span)> {
         => vec![],
         expr_dims[mut args] SLPar expr[e] SRPar => {
-            args.push(e);
+            args.push((e, span!()));
             args
         }
     }
@@ -214,8 +221,8 @@ parser! {
     }
 
     cons_decl: DataCons {
-        CId(cid) => DataCons::new(cid, vec![]),
-        CId(cid) Of cons_types[ts] => DataCons::new(cid, ts)
+        cid_with_span[(cid, span)] => DataCons::new(cid, vec![]).at(span),
+        cid_with_span[(cid, span)] Of cons_types[ts] => DataCons::new(cid, ts).at(span)
     }
 
     cons_types: Vec<Type> {
