@@ -19,6 +19,8 @@ pub mod optimize;
 pub mod parse;
 pub mod util;
 
+use util::PrettyDisplay;
+
 fn create_lexer<'a, T: BufRead>(read: &'a mut T) -> lex::TokenStream<'a> {
     lex::TokenStream::new(lex::Lexer::new(Box::new(move || -> Option<String> {
         let mut line = String::new();
@@ -192,7 +194,7 @@ fn parse_command<'a>(args: &ArgMatches<'a>) {
     print_errors(&mut errors);
 
     if errors.is_empty() {
-        println!("{:?}", parse_result.unwrap());
+        println!("{}", parse_result.unwrap().pretty());
     }
 }
 

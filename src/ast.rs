@@ -1,4 +1,7 @@
+use std::fmt;
+
 use lex::Span;
+use util::PrettyDisplay;
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -12,6 +15,25 @@ impl Block {
     }
 }
 
+impl PrettyDisplay for Block {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}Block", indent)?;
+
+        for decl in &self.decls {
+            write!(f, "\n{}", decl.pretty_indented(&next_indent))?;
+        };
+
+        for stmt in &self.stmts {
+            write!(f, "\n{}", stmt.pretty_indented(&next_indent))?;
+        };
+
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Type {
     Int,
@@ -19,6 +41,19 @@ pub enum Type {
     Bool,
     Char,
     Id(String, Span)
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::Type::*;
+        match *self {
+            Int => write!(f, "int"),
+            Real => write!(f, "real"),
+            Bool => write!(f, "bool"),
+            Char => write!(f, "char"),
+            Id(ref name, _) => write!(f, "{}", name)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +71,21 @@ impl VarSpec {
     pub fn at(mut self, span: Span) -> VarSpec {
         self.span = span;
         self
+    }
+}
+
+impl PrettyDisplay for VarSpec {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}VarSpec {}", indent, self.id)?;
+
+        for dim in &self.dims {
+            write!(f, "\n{}", dim.pretty_indented(&next_indent))?;
+        };
+
+        Result::Ok(())
     }
 }
 
@@ -58,6 +108,12 @@ impl FunParam {
     }
 }
 
+impl PrettyDisplay for FunParam {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{} {} {}", indent, self.id, self.val_type, self.dims)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunSig {
     pub params: Vec<FunParam>,
@@ -67,6 +123,23 @@ pub struct FunSig {
 impl FunSig {
     pub fn new(params: Vec<FunParam>, return_type: Type) -> FunSig {
         FunSig { params: params, return_type: return_type }
+    }
+}
+
+impl PrettyDisplay for FunSig {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str("  ");
+
+        write!(f, "{}FunSig\n{} Params", indent, indent)?;
+
+        for param in &self.params {
+            write!(f, "\n{}", param.pretty_indented(&next_indent))?;
+        };
+
+        write!(f, "\n{} Returns {}", indent, self.return_type)?;
+
+        Result::Ok(())
     }
 }
 
@@ -85,6 +158,22 @@ impl DataCons {
     pub fn at(mut self, span: Span) -> DataCons {
         self.span = span;
         self
+    }
+}
+
+impl PrettyDisplay for DataCons {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}#{}", indent, self.cid)?;
+
+        if self.types.len() != 0 {
+            write!(f, " of {}", self.types.first().unwrap())?;
+
+            for t in &self.types[1..] {
+                write!(f, " * {}", t)?;
+            };
+        };
+
+        Result::Ok(())
     }
 }
 
@@ -121,6 +210,44 @@ impl Decl {
     pub fn at(mut self, span: Span) -> Decl {
         self.span = span;
         self
+    }
+}
+
+impl PrettyDisplay for Decl {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::DeclType::*;
+
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        match self.node {
+            Var(ref var_specs, ref val_type) => {
+                write!(f, "{}VarDecl {}", indent, val_type)?;
+
+                for var_spec in var_specs {
+                    write!(f, "\n{}", var_spec.pretty_indented(&next_indent))?;
+                }
+            },
+            Fun(ref id, ref sig, ref block) => {
+                write!(
+                    f,
+                    "{}FunDecl {}\n{}\n{}",
+                    indent,
+                    id,
+                    sig.pretty_indented(&next_indent),
+                    block.pretty_indented(&next_indent)
+                )?;
+            },
+            Data(ref id, ref ctors) => {
+                write!(f, "{}DataDecl {}", indent, id)?;
+
+                for ctor in ctors {
+                    write!(f, "\n{}", ctor.pretty_indented(&next_indent))?;
+                };
+            }
+        };
+
+        Result::Ok(())
     }
 }
 
@@ -270,6 +397,205 @@ impl Expr {
     }
 }
 
+impl PrettyDisplay for Expr {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::ExprType::*;
+
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        match self.node {
+            Or(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Or\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            And(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}And\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Not(ref val) => {
+                write!(
+                    f,
+                    "{}Not\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Equal(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Equal\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Lt(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Lt\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Gt(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Gt\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Le(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Le\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Ge(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Ge\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Add(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Add\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Sub(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Sub\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Mul(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Mul\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Div(ref lhs, ref rhs) => {
+                write!(
+                    f,
+                    "{}Div\n{}\n{}",
+                    indent,
+                    lhs.pretty_indented(&next_indent),
+                    rhs.pretty_indented(&next_indent)
+                )?;
+            },
+            Size(ref id, ref dims) => {
+                write!(
+                    f,
+                    "{}Size {} {}",
+                    indent,
+                    id,
+                    dims
+                )?;
+            },
+            Float(ref val) => {
+                write!(
+                    f,
+                    "{}Float\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Floor(ref val) => {
+                write!(
+                    f,
+                    "{}Floor\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Ceil(ref val) => {
+                write!(
+                    f,
+                    "{}Ceil\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Id(ref id) => {
+                write!(
+                    f,
+                    "{}Id {}",
+                    indent,
+                    id
+                )?;
+            },
+            Call(ref func, ref args) => {
+                write!(
+                    f,
+                    "{}Call\n{}",
+                    indent,
+                    func.pretty_indented(&next_indent)
+                )?;
+                for a in args {
+                    write!(f, "\n{}", a.pretty_indented(&next_indent))?;
+                };
+            },
+            Index(ref arr, ref ind) => {
+                write!(
+                    f,
+                    "{}Index\n{}\n{}",
+                    indent,
+                    arr.pretty_indented(&next_indent),
+                    ind.pretty_indented(&next_indent)
+                )?;
+            },
+            Cons(ref cid, ref args) => {
+                write!(f, "{}Cons #{}", indent, cid)?;
+                for a in args {
+                    write!(f, "\n{}", a.pretty_indented(&next_indent))?;
+                };
+            },
+            Int(ref val) => write!(f, "{}Int {}", indent, val)?,
+            Real(ref val) => write!(f, "{}Real {}", indent, val)?,
+            Bool(ref val) => write!(f, "{}Bool {}", indent, val)?,
+            Char(ref val) => write!(f, "{}Char \"{}\"", indent, val)?,
+            Neg(ref val) => {
+                write!(
+                    f,
+                    "{}Neg\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            }
+        };
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Case {
     pub cid: String,
@@ -286,6 +612,27 @@ impl Case {
     pub fn at(mut self, span: Span) -> Case {
         self.span = span;
         self
+    }
+}
+
+impl PrettyDisplay for Case {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}#{}", indent, self.cid)?;
+
+        if self.vars.len() != 0 {
+            write!(f, "({}", self.vars.first().unwrap().0)?;
+            for (var, _) in &self.vars[1..] {
+                write!(f, ", {}", var)?;
+            }
+            write!(f, ")")?;
+        }
+
+        write!(f, "\n{}", self.stmt.pretty_indented(&next_indent))?;
+
+        Result::Ok(())
     }
 }
 
@@ -347,5 +694,83 @@ impl Stmt {
     pub fn at(mut self, span: Span) -> Stmt {
         self.span = span;
         self
+    }
+}
+
+impl PrettyDisplay for Stmt {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::StmtType::*;
+
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        match self.node {
+            IfThenElse(ref cond, ref true_stmt, ref false_stmt) => {
+                write!(
+                    f,
+                    "{}IfThenElse\n{}\n{}\n{}",
+                    indent,
+                    cond.pretty_indented(&next_indent),
+                    true_stmt.pretty_indented(&next_indent),
+                    false_stmt.pretty_indented(&next_indent)
+                )?;
+            },
+            WhileDo(ref cond, ref do_stmt) => {
+                write!(
+                    f,
+                    "{}WhileDo\n{}\n{}",
+                    indent,
+                    cond.pretty_indented(&next_indent),
+                    do_stmt.pretty_indented(&next_indent)
+                )?;
+            },
+            Read(ref target) => {
+                write!(
+                    f,
+                    "{}Read\n{}",
+                    indent,
+                    target.pretty_indented(&next_indent)
+                )?;
+            },
+            Assign(ref target, ref val) => {
+                write!(
+                    f,
+                    "{}Assign\n{}\n{}",
+                    indent,
+                    target.pretty_indented(&next_indent),
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Print(ref val) => {
+                write!(
+                    f,
+                    "{}Print\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            },
+            Block(ref block) => write!(f, "{}", block.pretty_indented(indent))?,
+            Case(ref val, ref cases) => {
+                write!(
+                    f,
+                    "{}Case\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+
+                for case in cases {
+                    write!(f, "\n{}", case.pretty_indented(&next_indent))?;
+                };
+            },
+            Return(ref val) => {
+                write!(
+                    f,
+                    "{}Return\n{}",
+                    indent,
+                    val.pretty_indented(&next_indent)
+                )?;
+            }
+        };
+        Result::Ok(())
     }
 }
