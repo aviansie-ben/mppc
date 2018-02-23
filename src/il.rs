@@ -247,16 +247,16 @@ impl BasicBlock {
 
 impl fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "block @{}", self.id));
+        writeln!(f, "block @{}", self.id)?;
 
         for instr in &self.instrs {
-            try!(writeln!(f, "{}", instr));
+            writeln!(f, "{}", instr)?;
         };
 
         if let Some(successor) = self.successor {
-            try!(write!(f, "j @{}", successor));
+            write!(f, "j @{}", successor)?;
         } else {
-            try!(write!(f, "j @end"));
+            write!(f, "j @end")?;
         };
 
         Result::Ok(())
@@ -312,7 +312,7 @@ impl fmt::Display for FlowGraph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for id in 0..self.next_block {
             if let Some(block) = self.blocks.get(&id) {
-                try!(writeln!(f, "\n{}", block));
+                writeln!(f, "\n{}", block)?;
             }
         };
         Result::Ok(())
