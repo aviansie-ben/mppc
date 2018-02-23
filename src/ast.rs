@@ -40,19 +40,43 @@ pub enum Type {
     Real,
     Bool,
     Char,
-    Id(String, Span)
+    Id(String, Span),
+    Array(Box<Type>, u32)
+}
+
+impl Type {
+    pub fn wrap_in_array(self, dims: u32) -> Type {
+        use ast::Type::*;
+
+        if dims == 0 {
+            self
+        } else {
+            match self {
+                Array(t, prev_dims) => Array(t, prev_dims + dims),
+                t => Array(Box::new(t), dims)
+            }
+        }
+    }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ast::Type::*;
         match *self {
-            Int => write!(f, "int"),
-            Real => write!(f, "real"),
-            Bool => write!(f, "bool"),
-            Char => write!(f, "char"),
-            Id(ref name, _) => write!(f, "{}", name)
-        }
+            Int => write!(f, "int")?,
+            Real => write!(f, "real")?,
+            Bool => write!(f, "bool")?,
+            Char => write!(f, "char")?,
+            Id(ref name, _) => write!(f, "{}", name)?,
+            Array(ref inner_type, ref dims) => {
+                write!(f, "{}", inner_type)?;
+
+                for _ in 0..*dims {
+                    write!(f, "[]")?;
+                };
+            }
+        };
+        Result::Ok(())
     }
 }
 
@@ -93,13 +117,12 @@ impl PrettyDisplay for VarSpec {
 pub struct FunParam {
     pub id: String,
     pub val_type: Type,
-    pub dims: u32,
     pub span: Span
 }
 
 impl FunParam {
-    pub fn new(id: String, val_type: Type, dims: u32) -> FunParam {
-        FunParam { id: id, val_type: val_type, dims: dims, span: Span::dummy() }
+    pub fn new(id: String, val_type: Type) -> FunParam {
+        FunParam { id: id, val_type: val_type, span: Span::dummy() }
     }
 
     pub fn at(mut self, span: Span) -> FunParam {
@@ -110,7 +133,7 @@ impl FunParam {
 
 impl PrettyDisplay for FunParam {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{} {} {}", indent, self.id, self.val_type, self.dims)
+        write!(f, "{}{} {}", indent, self.id, self.val_type)
     }
 }
 
@@ -179,7 +202,7 @@ impl PrettyDisplay for DataCons {
 
 #[derive(Debug, Clone)]
 pub enum DeclType {
-    Var(Vec<VarSpec>, Type),
+    Var(VarSpec, Type),
     Fun(String, FunSig, Block),
     Data(String, Vec<DataCons>)
 }
@@ -190,13 +213,23 @@ pub struct Decl {
     pub span: Span
 }
 
+// This enum is used when parsing a single declaration. The reason for this is that variable
+// declarations will actually desugar into multiple Decls due to the fact that multiple variables
+// can be declared in a single declaration. However, we want to avoid allocating heap space for a
+// Vec<Decl> for other Decls that don't exhibit this behaviour.
+#[derive(Debug, Clone)]
+pub enum MultiDecl {
+    Single(Decl),
+    Multiple(Vec<Decl>)
+}
+
 impl Decl {
     pub fn new(node: DeclType) -> Decl {
         Decl { node: node, span: Span::dummy() }
     }
 
-    pub fn var(specs: Vec<VarSpec>, val_type: Type) -> Decl {
-        Decl::new(DeclType::Var(specs, val_type))
+    pub fn var(spec: VarSpec, val_type: Type) -> Decl {
+        Decl::new(DeclType::Var(spec, val_type))
     }
 
     pub fn func(name: String, sig: FunSig, body: Block) -> Decl {
@@ -221,12 +254,14 @@ impl PrettyDisplay for Decl {
         next_indent.push_str(" ");
 
         match self.node {
-            Var(ref var_specs, ref val_type) => {
-                write!(f, "{}VarDecl {}", indent, val_type)?;
-
-                for var_spec in var_specs {
-                    write!(f, "\n{}", var_spec.pretty_indented(&next_indent))?;
-                }
+            Var(ref var_spec, ref val_type) => {
+                write!(
+                    f,
+                    "{}VarDecl {}\n{}",
+                    indent,
+                    val_type,
+                    var_spec.pretty_indented(&next_indent)
+                )?;
             },
             Fun(ref id, ref sig, ref block) => {
                 write!(

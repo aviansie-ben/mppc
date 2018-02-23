@@ -1,6 +1,6 @@
 #![allow(unused_mut)]
 
-use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, Stmt, Type, VarSpec};
+use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, MultiDecl, Stmt, Type, VarSpec};
 use lex::{Span, Token, TokenStream};
 
 type Error = (String, Span);
@@ -24,20 +24,32 @@ parser! {
 
     decls: Vec<Decl> {
         => vec![],
-        decls[mut ds] decl[d] Semicolon => {
-            ds.push(d);
+        decls[mut ds] decl[nd] Semicolon => {
+            match nd {
+                MultiDecl::Single(nd) => {
+                    ds.push(nd);
+                },
+                MultiDecl::Multiple(mut nds) => {
+                    ds.append(&mut nds);
+                }
+            };
             ds
         }
     }
 
-    decl: Decl {
-        Var var_specs[vss] Colon type_[t] => Decl::var(vss, t).at(span!()),
-        Fun id_with_span[(id, span)] LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => Decl::func(
+    decl: MultiDecl {
+        Var var_specs[vss] Colon type_[t] => MultiDecl::Multiple(
+            vss.into_iter().map(|vs| {
+                let t = t.clone().wrap_in_array(vs.dims.len() as u32);
+                Decl::var(vs, t).at(span!())
+            }).collect::<Vec<_>>()
+        ),
+        Fun id_with_span[(id, span)] LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => MultiDecl::Single(Decl::func(
             id,
             FunSig::new(ps, rt),
             Block::new(ds, body)
-        ).at(span),
-        Data id_with_span[(id, span)] Equal cons_decls[cs] => Decl::data(id, cs).at(span)
+        ).at(span)),
+        Data id_with_span[(id, span)] Equal cons_decls[cs] => MultiDecl::Single(Decl::data(id, cs).at(span))
     }
 
     type_: Type {
@@ -74,7 +86,9 @@ parser! {
     }
 
     param: FunParam {
-        id_with_span[(id, span)] param_dims[dims] Colon type_[t] => FunParam::new(id, t, dims).at(span)
+        id_with_span[(id, span)] param_dims[dims] Colon type_[t] => {
+            FunParam::new(id, t.wrap_in_array(dims)).at(span)
+        }
     }
 
     param_dims: u32 {
