@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::Write;
 use std::mem;
 
-use parse;
+use ast;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IlConst {
@@ -319,7 +319,7 @@ impl fmt::Display for FlowGraph {
     }
 }
 
-pub fn generate_il(block: &parse::Block, w: &mut Write) -> FlowGraph {
+pub fn generate_il(block: &ast::Block, w: &mut Write) -> FlowGraph {
     let mut g = FlowGraph::new();
     let mut b = BasicBlock::new(0);
 
