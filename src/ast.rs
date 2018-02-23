@@ -617,7 +617,7 @@ impl PrettyDisplay for Expr {
             Int(ref val) => write!(f, "{}Int {}", indent, val)?,
             Real(ref val) => write!(f, "{}Real {}", indent, val)?,
             Bool(ref val) => write!(f, "{}Bool {}", indent, val)?,
-            Char(ref val) => write!(f, "{}Char \"{}\"", indent, val)?,
+            Char(ref val) => write!(f, "{}Char {:?}", indent, val)?,
             Neg(ref val) => {
                 write!(
                     f,
