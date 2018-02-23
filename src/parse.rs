@@ -1,7 +1,5 @@
 #![allow(unused_mut)]
 
-use std::fmt;
-
 use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, Stmt, Type, VarSpec};
 use lex;
 use lex::{Span, Token, TokenStream};
@@ -52,7 +50,7 @@ parser! {
     }
 
     var_spec: VarSpec {
-        Id(id) => VarSpec { id: id, dims: vec![] },
+        Id(id) => VarSpec::new(id, vec![]),
         var_spec[mut vs] SLPar expr[e] SRPar => {
             vs.dims.push(e);
             vs

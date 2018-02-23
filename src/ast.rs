@@ -25,6 +25,12 @@ pub struct VarSpec {
     pub dims: Vec<Expr>
 }
 
+impl VarSpec {
+    pub fn new(id: String, dims: Vec<Expr>) -> VarSpec {
+        VarSpec { id: id, dims: dims }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunParam {
     pub id: String,
