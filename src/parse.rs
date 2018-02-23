@@ -13,6 +13,12 @@ pub struct Block {
     pub stmts: Vec<Stmt>
 }
 
+impl Block {
+    pub fn new(decls: Vec<Decl>, stmts: Vec<Stmt>) -> Block {
+        Block { decls: decls, stmts: stmts }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Type {
     Int,
@@ -35,16 +41,22 @@ pub struct FunParam {
     pub dims: u32
 }
 
+impl FunParam {
+    pub fn new(id: String, val_type: Type, dims: u32) -> FunParam {
+        FunParam { id: id, val_type: val_type, dims: dims }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunSig {
     pub params: Vec<FunParam>,
     pub return_type: Type
 }
 
-#[derive(Debug, Clone)]
-pub struct FunBody {
-    pub decls: Vec<Decl>,
-    pub stmts: Vec<Stmt>
+impl FunSig {
+    pub fn new(params: Vec<FunParam>, return_type: Type) -> FunSig {
+        FunSig { params: params, return_type: return_type }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,15 +65,44 @@ pub struct DataCons {
     pub types: Vec<Type>
 }
 
+impl DataCons {
+    pub fn new(cid: String, types: Vec<Type>) -> DataCons {
+        DataCons { cid: cid, types: types }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum Decl {
+pub enum DeclType {
     Var(Vec<VarSpec>, Type),
-    Fun(String, FunSig, FunBody),
+    Fun(String, FunSig, Block),
     Data(String, Vec<DataCons>)
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Decl {
+    pub node: DeclType
+}
+
+impl Decl {
+    pub fn new(node: DeclType) -> Decl {
+        Decl { node: node }
+    }
+
+    pub fn var(specs: Vec<VarSpec>, val_type: Type) -> Decl {
+        Decl::new(DeclType::Var(specs, val_type))
+    }
+
+    pub fn func(name: String, sig: FunSig, body: Block) -> Decl {
+        Decl::new(DeclType::Fun(name, sig, body))
+    }
+
+    pub fn data(name: String, ctors: Vec<DataCons>) -> Decl {
+        Decl::new(DeclType::Data(name, ctors))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprType {
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -90,14 +131,131 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
+pub struct Expr {
+    pub node: ExprType
+}
+
+impl Expr {
+    pub fn new(node: ExprType) -> Expr {
+        Expr { node: node }
+    }
+
+    pub fn or(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Or(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn and(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::And(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn not(val: Expr) -> Expr {
+        Expr::new(ExprType::Not(Box::new(val)))
+    }
+
+    pub fn equal_to(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Equal(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn less_than(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Lt(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn greater_than(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Ge(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn less_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Le(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn greater_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Ge(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn add(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Add(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn sub(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Sub(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn mul(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Mul(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn div(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(ExprType::Div(Box::new(lhs), Box::new(rhs)))
+    }
+
+    pub fn size_of(id: String, array_derefs: u32) -> Expr {
+        Expr::new(ExprType::Size(id, array_derefs))
+    }
+
+    pub fn float(val: Expr) -> Expr {
+        Expr::new(ExprType::Float(Box::new(val)))
+    }
+
+    pub fn floor(val: Expr) -> Expr {
+        Expr::new(ExprType::Floor(Box::new(val)))
+    }
+
+    pub fn ceil(val: Expr) -> Expr {
+        Expr::new(ExprType::Ceil(Box::new(val)))
+    }
+
+    pub fn identifier(id: String) -> Expr {
+        Expr::new(ExprType::Id(id))
+    }
+
+    pub fn call(func: Expr, args: Vec<Expr>) -> Expr {
+        Expr::new(ExprType::Call(Box::new(func), args))
+    }
+
+    pub fn index(arr: Expr, ind: Expr) -> Expr {
+        Expr::new(ExprType::Index(Box::new(arr), Box::new(ind)))
+    }
+
+    pub fn cons(cid: String, args: Vec<Expr>) -> Expr {
+        Expr::new(ExprType::Cons(cid, args))
+    }
+
+    pub fn int(val: i32) -> Expr {
+        Expr::new(ExprType::Int(val))
+    }
+
+    pub fn real(val: f64) -> Expr {
+        Expr::new(ExprType::Real(val))
+    }
+
+    pub fn bool(val: bool) -> Expr {
+        Expr::new(ExprType::Bool(val))
+    }
+
+    pub fn char(val: char) -> Expr {
+        Expr::new(ExprType::Char(val))
+    }
+
+    pub fn negate(val: Expr) -> Expr {
+        Expr::new(ExprType::Neg(Box::new(val)))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Case {
     pub cid: String,
     pub vars: Vec<String>,
     pub stmt: Stmt
 }
 
+impl Case {
+    pub fn new(cid: String, vars: Vec<String>, stmt: Stmt) -> Case {
+        Case { cid: cid, vars: vars, stmt: stmt }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub enum StmtType {
     IfThenElse(Expr, Box<Stmt>, Box<Stmt>),
     WhileDo(Expr, Box<Stmt>),
     Read(Expr),
@@ -108,13 +266,56 @@ pub enum Stmt {
     Return(Expr)
 }
 
+#[derive(Debug, Clone)]
+pub struct Stmt {
+    pub node: StmtType
+}
+
+impl Stmt {
+    pub fn new(node: StmtType) -> Stmt {
+        Stmt { node: node }
+    }
+
+    pub fn if_then_else(cond: Expr, true_stmt: Stmt, false_stmt: Stmt) -> Stmt {
+        Stmt::new(StmtType::IfThenElse(cond, Box::new(true_stmt), Box::new(false_stmt)))
+    }
+
+    pub fn while_do(cond: Expr, do_stmt: Stmt) -> Stmt {
+        Stmt::new(StmtType::WhileDo(cond, Box::new(do_stmt)))
+    }
+
+    pub fn read(target: Expr) -> Stmt {
+        Stmt::new(StmtType::Read(target))
+    }
+
+    pub fn assign(target: Expr, val: Expr) -> Stmt {
+        Stmt::new(StmtType::Assign(target, val))
+    }
+
+    pub fn print(val: Expr) -> Stmt {
+        Stmt::new(StmtType::Print(val))
+    }
+
+    pub fn block(block: Block) -> Stmt {
+        Stmt::new(StmtType::Block(block))
+    }
+
+    pub fn case(val: Expr, cases: Vec<Case>) -> Stmt {
+        Stmt::new(StmtType::Case(val, cases))
+    }
+
+    pub fn return_value(val: Expr) -> Stmt {
+        Stmt::new(StmtType::Return(val))
+    }
+}
+
 parser! {
     fn _parse(Token, Span);
 
     (a, b) { lex::combine_spans(a, b) }
 
     block: Block {
-        decls[ds] stmts[ss] => Block { decls: ds, stmts: ss }
+        decls[ds] stmts[ss] => Block::new(ds, ss)
     }
 
     decls: Vec<Decl> {
@@ -126,13 +327,13 @@ parser! {
     }
 
     decl: Decl {
-        Var var_specs[vss] Colon type_[t] => Decl::Var(vss, t),
-        Fun Id(id) LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => Decl::Fun(
+        Var var_specs[vss] Colon type_[t] => Decl::var(vss, t),
+        Fun Id(id) LPar params[ps] RPar Colon type_[rt] CLPar decls[ds] fun_body[body] CRPar => Decl::func(
             id,
-            FunSig { params: ps, return_type: rt },
-            FunBody { decls: ds, stmts: body }
+            FunSig::new(ps, rt),
+            Block::new(ds, body)
         ),
-        Data Id(id) Equal cons_decls[cs] => Decl::Data(id, cs)
+        Data Id(id) Equal cons_decls[cs] => Decl::data(id, cs)
     }
 
     type_: Type {
@@ -169,11 +370,7 @@ parser! {
     }
 
     param: FunParam {
-        Id(id) param_dims[dims] Colon type_[t] => FunParam {
-            id: id,
-            val_type: t,
-            dims: dims
-        }
+        Id(id) param_dims[dims] Colon type_[t] => FunParam::new(id, t, dims)
     }
 
     param_dims: u32 {
@@ -183,25 +380,25 @@ parser! {
 
     fun_body: Vec<Stmt> {
         Begin stmts[mut ss] Return expr[e] Semicolon End => {
-            ss.push(Stmt::Return(e));
+            ss.push(Stmt::return_value(e));
             ss
         },
         stmts[mut ss] Return expr[e] Semicolon => {
-            ss.push(Stmt::Return(e));
+            ss.push(Stmt::return_value(e));
             ss
         }
     }
 
     stmt: Stmt {
-        If expr[cond] Then stmt[then_stmt] Else stmt[else_stmt] => Stmt::IfThenElse(
-            cond, Box::new(then_stmt), Box::new(else_stmt)
+        If expr[cond] Then stmt[then_stmt] Else stmt[else_stmt] => Stmt::if_then_else(
+            cond, then_stmt, else_stmt
         ),
-        While expr[cond] Do stmt[do_stmt] => Stmt::WhileDo(cond, Box::new(do_stmt)),
-        Read loc[l] => Stmt::Read(l),
-        loc[l] Assign expr[e] => Stmt::Assign(l, e),
-        Print expr[val] => Stmt::Print(val),
-        CLPar block[b] CRPar => Stmt::Block(b),
-        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::Case(e, cs)
+        While expr[cond] Do stmt[do_stmt] => Stmt::while_do(cond, do_stmt),
+        Read loc[l] => Stmt::read(l),
+        loc[l] Assign expr[e] => Stmt::assign(l, e),
+        Print expr[val] => Stmt::print(val),
+        CLPar block[b] CRPar => Stmt::block(b),
+        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs)
     }
 
     stmts: Vec<Stmt> {
@@ -213,13 +410,13 @@ parser! {
     }
 
     loc: Expr {
-        Id(id) => Expr::Id(id),
-        loc[l] SLPar expr[e] SRPar => Expr::Index(Box::new(l), Box::new(e))
+        Id(id) => Expr::identifier(id),
+        loc[l] SLPar expr[e] SRPar => Expr::index(l, e)
     }
 
     case: Case {
-        CId(cid) Arrow stmt[s] => Case { cid: cid, vars: vec![], stmt: s },
-        CId(cid) LPar var_list[vs] RPar Arrow stmt[s] => Case { cid: cid, vars: vs, stmt: s }
+        CId(cid) Arrow stmt[s] => Case::new(cid, vec![], s),
+        CId(cid) LPar var_list[vs] RPar Arrow stmt[s] => Case::new(cid, vs, s)
     }
 
     cases: Vec<Case> {
@@ -239,59 +436,59 @@ parser! {
     }
 
     expr: Expr {
-        expr[lhs] Or bint_term[rhs] => Expr::Or(Box::new(lhs), Box::new(rhs)),
+        expr[lhs] Or bint_term[rhs] => Expr::or(lhs, rhs),
         bint_term[t] => t
     }
 
     bint_term: Expr {
-        bint_term[lhs] And bint_factor[rhs] => Expr::And(Box::new(lhs), Box::new(rhs)),
+        bint_term[lhs] And bint_factor[rhs] => Expr::and(lhs, rhs),
         bint_factor[f] => f
     }
 
     bint_factor: Expr {
-        Not bint_factor[f] => Expr::Not(Box::new(f)),
-        int_expr[lhs] Equal int_expr[rhs] => Expr::Equal(Box::new(lhs), Box::new(rhs)),
-        int_expr[lhs] Lt int_expr[rhs] => Expr::Lt(Box::new(lhs), Box::new(rhs)),
-        int_expr[lhs] Gt int_expr[rhs] => Expr::Gt(Box::new(lhs), Box::new(rhs)),
-        int_expr[lhs] Le int_expr[rhs] => Expr::Le(Box::new(lhs), Box::new(rhs)),
-        int_expr[lhs] Ge int_expr[rhs] => Expr::Ge(Box::new(lhs), Box::new(rhs)),
+        Not bint_factor[f] => Expr::not(f),
+        int_expr[lhs] Equal int_expr[rhs] => Expr::equal_to(lhs, rhs),
+        int_expr[lhs] Lt int_expr[rhs] => Expr::less_than(lhs, rhs),
+        int_expr[lhs] Gt int_expr[rhs] => Expr::greater_than(lhs, rhs),
+        int_expr[lhs] Le int_expr[rhs] => Expr::less_than_or_equal(lhs, rhs),
+        int_expr[lhs] Ge int_expr[rhs] => Expr::greater_than_or_equal(lhs, rhs),
         int_expr[e] => e
     }
 
     int_expr: Expr {
-        int_expr[lhs] Add int_term[rhs] => Expr::Add(Box::new(lhs), Box::new(rhs)),
-        int_expr[lhs] Sub int_term[rhs] => Expr::Sub(Box::new(lhs), Box::new(rhs)),
+        int_expr[lhs] Add int_term[rhs] => Expr::add(lhs, rhs),
+        int_expr[lhs] Sub int_term[rhs] => Expr::sub(lhs, rhs),
         int_term[t] => t
     }
 
     int_term: Expr {
-        int_term[lhs] Mul int_factor[rhs] => Expr::Mul(Box::new(lhs), Box::new(rhs)),
-        int_term[lhs] Div int_factor[rhs] => Expr::Div(Box::new(lhs), Box::new(rhs)),
+        int_term[lhs] Mul int_factor[rhs] => Expr::mul(lhs, rhs),
+        int_term[lhs] Div int_factor[rhs] => Expr::div(lhs, rhs),
         int_factor[f] => f
     }
 
     int_factor: Expr {
         LPar expr[e] RPar => e,
-        Size LPar Id(id) param_dims[dims] RPar => Expr::Size(id, dims),
-        Float LPar expr[e] RPar => Expr::Float(Box::new(e)),
-        Floor LPar expr[e] RPar => Expr::Floor(Box::new(e)),
-        Ceil LPar expr[e] RPar => Expr::Ceil(Box::new(e)),
-        Id(id) LPar arg_list[args] RPar => Expr::Call(Box::new(Expr::Id(id)), args),
+        Size LPar Id(id) param_dims[dims] RPar => Expr::size_of(id, dims),
+        Float LPar expr[e] RPar => Expr::float(e),
+        Floor LPar expr[e] RPar => Expr::floor(e),
+        Ceil LPar expr[e] RPar => Expr::ceil(e),
+        Id(id) LPar arg_list[args] RPar => Expr::call(Expr::identifier(id), args),
         Id(id) expr_dims[args] => {
-            let mut e = Expr::Id(id);
+            let mut e = Expr::identifier(id);
 
             for a in args {
-                e = Expr::Index(Box::new(e), Box::new(a));
+                e = Expr::index(e, a);
             };
             e
         },
-        CId(cid) => Expr::Cons(cid, vec![]),
-        CId(cid) LPar arg_list[args] RPar => Expr::Cons(cid, args),
-        IVal(i) => Expr::Int(i),
-        RVal(f) => Expr::Real(f),
-        BVal(b) => Expr::Bool(b),
-        CVal(c) => Expr::Char(c),
-        Sub int_factor[f] => Expr::Neg(Box::new(f))
+        CId(cid) => Expr::cons(cid, vec![]),
+        CId(cid) LPar arg_list[args] RPar => Expr::cons(cid, args),
+        IVal(i) => Expr::int(i),
+        RVal(f) => Expr::real(f),
+        BVal(b) => Expr::bool(b),
+        CVal(c) => Expr::char(c),
+        Sub int_factor[f] => Expr::negate(f)
     }
 
     arg_list: Vec<Expr> {
@@ -320,8 +517,8 @@ parser! {
     }
 
     cons_decl: DataCons {
-        CId(cid) => DataCons { cid: cid, types: vec![] },
-        CId(cid) Of cons_types[ts] => DataCons { cid: cid, types: ts }
+        CId(cid) => DataCons::new(cid, vec![]),
+        CId(cid) Of cons_types[ts] => DataCons::new(cid, ts)
     }
 
     cons_types: Vec<Type> {
