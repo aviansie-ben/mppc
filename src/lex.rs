@@ -310,6 +310,8 @@ lexer! {
     r#"fun"# => (Token::Fun, text),
     r#"return"# => (Token::Return, text),
 
+    r#"true"# => (Token::BVal(true), text),
+    r#"false"# => (Token::BVal(false), text),
     r#"#[a-zA-Z0-9_]*"# => (Token::CId(text[1..].to_owned()), text),
     r#"[a-zA-Z][a-zA-Z0-9_]*"# => (Token::Id(text.to_owned()), text),
     r#"[0-9]+\.[0-9]+"# => if let Result::Ok(val) = text.parse::<f64>() {
@@ -322,8 +324,6 @@ lexer! {
     } else {
         (Token::Error("invalid integer literal".to_string()), text)
     },
-    r#"true"# => (Token::BVal(true), text),
-    r#"false"# => (Token::BVal(false), text),
     r#""\\n""# => (Token::CVal('\n'), text),
     r#""\\t""# => (Token::CVal('\t'), text),
     r#""\\"""# => (Token::CVal('"'), text),
