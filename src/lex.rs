@@ -91,7 +91,7 @@ impl fmt::Display for Token {
             Token::Equal => write!(f, "'='"),
             Token::Lt => write!(f, "'<'"),
             Token::Gt => write!(f, "'>'"),
-            Token::Le => write!(f, "'<='"),
+            Token::Le => write!(f, "'=<'"),
             Token::Ge => write!(f, "'>='"),
 
             Token::Assign => write!(f, "':='"),
@@ -269,7 +269,7 @@ lexer! {
     r#"="# => (Token::Equal, text),
     r#"<"# => (Token::Lt, text),
     r#">"# => (Token::Gt, text),
-    r#"<="# => (Token::Le, text),
+    r#"=<"# => (Token::Le, text),
     r#">="# => (Token::Ge, text),
 
     r#":="# => (Token::Assign, text),
