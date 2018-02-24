@@ -11,7 +11,8 @@ parser! {
     (a, b) { Span::combine(a, b) }
 
     block: Block {
-        decls[ds] stmts[ss] => Block::new(ds, ss)
+        decls[ds] stmts[ss] => Block::new(ds, ss),
+        decls[ds] Begin stmts[ss] End => Block::new(ds, ss)
     }
 
     id_with_span: (String, Span) {
