@@ -312,24 +312,67 @@ impl PrettyDisplay for Decl {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Or,
+    And,
+    Equal,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Add,
+    Sub,
+    Mul,
+    Div
+}
+
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::BinaryOp::*;
+        match self {
+            Or => write!(f, "Or"),
+            And => write!(f, "And"),
+            Equal => write!(f, "Equal"),
+            Lt => write!(f, "Lt"),
+            Gt => write!(f, "Gt"),
+            Le => write!(f, "Le"),
+            Ge => write!(f, "Ge"),
+            Add => write!(f, "Add"),
+            Sub => write!(f, "Sub"),
+            Mul => write!(f, "Mul"),
+            Div => write!(f, "Div")
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
+    Float,
+    Floor,
+    Ceil,
+    Neg
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ast::UnaryOp::*;
+        match self {
+            Not => write!(f, "Not"),
+            Float => write!(f, "Float"),
+            Floor => write!(f, "Floor"),
+            Ceil => write!(f, "Ceil"),
+            Neg => write!(f, "Neg")
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprType {
-    Or(Box<Expr>, Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
-    Not(Box<Expr>),
-    Equal(Box<Expr>, Box<Expr>),
-    Lt(Box<Expr>, Box<Expr>),
-    Gt(Box<Expr>, Box<Expr>),
-    Le(Box<Expr>, Box<Expr>),
-    Ge(Box<Expr>, Box<Expr>),
-    Add(Box<Expr>, Box<Expr>),
-    Sub(Box<Expr>, Box<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
-    Div(Box<Expr>, Box<Expr>),
+    BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
+    UnaryOp(UnaryOp, Box<Expr>),
     Size(String, u32),
-    Float(Box<Expr>),
-    Floor(Box<Expr>),
-    Ceil(Box<Expr>),
     Id(String),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
@@ -338,66 +381,66 @@ pub enum ExprType {
     Real(f64),
     Bool(bool),
     Char(char),
-    Neg(Box<Expr>)
 }
 
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub node: ExprType,
-    pub span: Span
+    pub span: Span,
+    pub val_type: symbol::Type
 }
 
 impl Expr {
     pub fn new(node: ExprType) -> Expr {
-        Expr { node: node, span: Span::dummy() }
+        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Error }
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Or(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Or, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn and(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::And(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::And, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn not(val: Expr) -> Expr {
-        Expr::new(ExprType::Not(Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Not, Box::new(val)))
     }
 
     pub fn equal_to(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Equal(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Equal, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn less_than(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Lt(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Lt, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn greater_than(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Ge(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Gt, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn less_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Le(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Le, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn greater_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Ge(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Ge, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn add(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Add(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Add, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn sub(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Sub(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Sub, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn mul(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Mul(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Mul, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn div(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::Div(Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Div, Box::new(lhs), Box::new(rhs)))
     }
 
     pub fn size_of(id: String, array_derefs: u32) -> Expr {
@@ -405,15 +448,15 @@ impl Expr {
     }
 
     pub fn float(val: Expr) -> Expr {
-        Expr::new(ExprType::Float(Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Float, Box::new(val)))
     }
 
     pub fn floor(val: Expr) -> Expr {
-        Expr::new(ExprType::Floor(Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Floor, Box::new(val)))
     }
 
     pub fn ceil(val: Expr) -> Expr {
-        Expr::new(ExprType::Ceil(Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Ceil, Box::new(val)))
     }
 
     pub fn identifier(id: String) -> Expr {
@@ -449,7 +492,7 @@ impl Expr {
     }
 
     pub fn negate(val: Expr) -> Expr {
-        Expr::new(ExprType::Neg(Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Neg, Box::new(val)))
     }
 
     pub fn at(mut self, span: Span) -> Expr {
@@ -466,111 +509,23 @@ impl PrettyDisplay for Expr {
         next_indent.push_str(" ");
 
         match self.node {
-            Or(ref lhs, ref rhs) => {
+            BinaryOp(op, ref lhs, ref rhs) => {
                 write!(
                     f,
-                    "{}Or\n{}\n{}",
+                    "{}{}\n{}\n{}",
                     indent,
+                    op,
                     lhs.pretty_indented(&next_indent),
                     rhs.pretty_indented(&next_indent)
                 )?;
             },
-            And(ref lhs, ref rhs) => {
+            UnaryOp(op, ref val) => {
                 write!(
                     f,
-                    "{}And\n{}\n{}",
+                    "{}{}\n{}",
                     indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Not(ref val) => {
-                write!(
-                    f,
-                    "{}Not\n{}",
-                    indent,
+                    op,
                     val.pretty_indented(&next_indent)
-                )?;
-            },
-            Equal(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Equal\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Lt(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Lt\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Gt(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Gt\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Le(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Le\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Ge(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Ge\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Add(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Add\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Sub(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Sub\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Mul(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Mul\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
-                )?;
-            },
-            Div(ref lhs, ref rhs) => {
-                write!(
-                    f,
-                    "{}Div\n{}\n{}",
-                    indent,
-                    lhs.pretty_indented(&next_indent),
-                    rhs.pretty_indented(&next_indent)
                 )?;
             },
             Size(ref id, ref dims) => {
@@ -580,30 +535,6 @@ impl PrettyDisplay for Expr {
                     indent,
                     id,
                     dims
-                )?;
-            },
-            Float(ref val) => {
-                write!(
-                    f,
-                    "{}Float\n{}",
-                    indent,
-                    val.pretty_indented(&next_indent)
-                )?;
-            },
-            Floor(ref val) => {
-                write!(
-                    f,
-                    "{}Floor\n{}",
-                    indent,
-                    val.pretty_indented(&next_indent)
-                )?;
-            },
-            Ceil(ref val) => {
-                write!(
-                    f,
-                    "{}Ceil\n{}",
-                    indent,
-                    val.pretty_indented(&next_indent)
                 )?;
             },
             Id(ref id) => {
@@ -643,15 +574,7 @@ impl PrettyDisplay for Expr {
             Int(ref val) => write!(f, "{}Int {}", indent, val)?,
             Real(ref val) => write!(f, "{}Real {}", indent, val)?,
             Bool(ref val) => write!(f, "{}Bool {}", indent, val)?,
-            Char(ref val) => write!(f, "{}Char {:?}", indent, val)?,
-            Neg(ref val) => {
-                write!(
-                    f,
-                    "{}Neg\n{}",
-                    indent,
-                    val.pretty_indented(&next_indent)
-                )?;
-            }
+            Char(ref val) => write!(f, "{}Char {:?}", indent, val)?
         };
         Result::Ok(())
     }
