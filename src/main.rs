@@ -106,6 +106,14 @@ fn parse_args<'a>() -> ArgMatches<'a> {
                 .index(1)
             )
         )
+        .subcommand(SubCommand::with_name("analyze")
+            .about("Analyzes M++ code to create an annotated AST")
+            .arg(Arg::with_name("input")
+                .value_name("INPUT FILE")
+                .help("Sets the input file to use (stdin is used if no input file is specified)")
+                .index(1)
+            )
+        )
         .subcommand(SubCommand::with_name("compile")
             .about("Compiles M++ code")
             .arg(Arg::with_name("input")
@@ -189,6 +197,42 @@ fn parse_command<'a>(args: &ArgMatches<'a>) {
             tokens.drain_tokens();
         },
         Result::Ok(_) => {}
+    }
+
+    tokens.finish(&mut errors);
+    print_errors(&mut errors);
+
+    if errors.is_empty() {
+        println!("{}", parse_result.unwrap().pretty());
+    }
+}
+
+fn analyze_command<'a>(args: &ArgMatches<'a>) {
+    let stdin = std::io::stdin();
+    let mut input: Box<BufRead> = if let Some(input) = args.value_of("input") {
+        match File::open(input) {
+            Ok(f) => Box::new(BufReader::new(f)),
+            Err(err) => {
+                println!("error opening input file: {}", err);
+                return;
+            }
+        }
+    } else {
+        Box::new(stdin.lock())
+    };
+
+    let mut tokens = create_lexer(&mut input);
+    let mut errors: Vec<(String, lex::Span)> = Vec::new();
+    let mut parse_result = parse::parse_program(&mut tokens);
+
+    match parse_result {
+        Result::Err(ref err) => {
+            errors.push(err.clone());
+            tokens.drain_tokens();
+        },
+        Result::Ok(ref mut program) => {
+            symbol::populate_symbol_tables(program, &mut errors);
+        }
     }
 
     tokens.finish(&mut errors);
@@ -305,6 +349,8 @@ fn main() {
         lex_command(lex_args);
     } else if let Some(parse_args) = args.subcommand_matches("parse") {
         parse_command(parse_args);
+    } else if let Some(analyze_args) = args.subcommand_matches("analyze") {
+        analyze_command(analyze_args);
     } else if let Some(compile_args) = args.subcommand_matches("compile") {
         compile_command(compile_args);
     }
