@@ -319,7 +319,7 @@ impl fmt::Display for FlowGraph {
     }
 }
 
-pub fn generate_il(block: &ast::Block, w: &mut Write) -> FlowGraph {
+pub fn generate_il(program: &ast::Program, w: &mut Write) -> FlowGraph {
     let mut g = FlowGraph::new();
     let mut b = BasicBlock::new(0);
 

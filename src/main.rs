@@ -17,6 +17,7 @@ pub mod il;
 #[macro_use] pub mod lex;
 pub mod optimize;
 pub mod parse;
+pub mod symbol;
 pub mod util;
 
 use util::PrettyDisplay;
@@ -180,14 +181,14 @@ fn parse_command<'a>(args: &ArgMatches<'a>) {
 
     let mut tokens = create_lexer(&mut input);
     let mut errors: Vec<(String, lex::Span)> = Vec::new();
-    let parse_result = parse::parse_block(&mut tokens);
+    let parse_result = parse::parse_program(&mut tokens);
 
-    match &parse_result {
-        &Result::Err(ref err) => {
+    match parse_result {
+        Result::Err(ref err) => {
             errors.push(err.clone());
             tokens.drain_tokens();
         },
-        &Result::Ok(_) => {}
+        Result::Ok(_) => {}
     }
 
     tokens.finish(&mut errors);
@@ -221,7 +222,7 @@ fn compile_stack_command<'a>(args: &ArgMatches<'a>) {
 
     let mut tokens = create_lexer(&mut input);
     let mut errors: Vec<(String, lex::Span)> = Vec::new();
-    let parse_result = parse::parse_block(&mut tokens);
+    let parse_result = parse::parse_program(&mut tokens);
 
     match &parse_result {
         &Result::Err(ref err) => {
@@ -265,7 +266,7 @@ fn compile_il_command<'a>(args: &ArgMatches<'a>) {
 
     let mut tokens = create_lexer(&mut input);
     let mut errors: Vec<(String, lex::Span)> = Vec::new();
-    let parse_result = parse::parse_block(&mut tokens);
+    let parse_result = parse::parse_program(&mut tokens);
 
     match &parse_result {
         &Result::Err(ref err) => {

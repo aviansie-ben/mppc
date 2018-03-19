@@ -1,6 +1,6 @@
 #![allow(unused_mut)]
 
-use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, MultiDecl, Stmt, Type, VarSpec};
+use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, MultiDecl, Program, Stmt, Type, VarSpec};
 use lex::{Span, Token, TokenStream};
 
 type Error = (String, Span);
@@ -9,6 +9,10 @@ parser! {
     fn _parse(Token, Span);
 
     (a, b) { Span::combine(a, b) }
+
+    program: Program {
+        block[b] => Program::new(b)
+    }
 
     block: Block {
         decls[ds] stmts[ss] => Block::new(ds, ss),
@@ -253,8 +257,8 @@ fn build_error((bad_tok, bad_span): (Token, Span), err: &'static str) -> Error {
     (format!("{}, but found {}", err, bad_tok), bad_span)
 }
 
-pub fn parse_block<'a: 'b, 'b>(tokens: &'b mut TokenStream<'a>)
-    -> Result<Block, Error> {
+pub fn parse_program<'a: 'b, 'b>(tokens: &'b mut TokenStream<'a>)
+    -> Result<Program, Error> {
     match _parse(tokens.iter()) {
         Result::Ok(block) => Result::Ok(block),
         Result::Err((None, err)) => Result::Err(build_error(tokens.pop(), err)),

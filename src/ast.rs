@@ -1,17 +1,43 @@
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 
 use lex::Span;
+use symbol;
 use util::PrettyDisplay;
+
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub block: Block,
+    pub types: symbol::TypeDefinitionTable
+}
+
+impl Program {
+    pub fn new(block: Block) -> Program {
+        Program { block: block, types: symbol::TypeDefinitionTable::new() }
+    }
+}
+
+impl PrettyDisplay for Program {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.block.pretty_indented(indent))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Block {
     pub decls: Vec<Decl>,
-    pub stmts: Vec<Stmt>
+    pub stmts: Vec<Stmt>,
+    pub symbols: Rc<RefCell<symbol::SymbolTable>>
 }
 
 impl Block {
     pub fn new(decls: Vec<Decl>, stmts: Vec<Stmt>) -> Block {
-        Block { decls: decls, stmts: stmts }
+        Block {
+            decls: decls,
+            stmts: stmts,
+            symbols: Rc::new(RefCell::new(symbol::SymbolTable::new()))
+        }
     }
 }
 
@@ -34,7 +60,7 @@ impl PrettyDisplay for Block {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Real,
