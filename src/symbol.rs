@@ -1,11 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::fmt;
 use std::mem;
 use std::rc::Rc;
 
 use ast;
 use lex::Span;
-use util::ChainRef;
+use util::{ChainRef, PrettyDisplay};
 
 #[derive(Debug, Clone)]
 pub struct FunSymbol {
@@ -14,15 +15,56 @@ pub struct FunSymbol {
     pub body: RefCell<ast::Block>
 }
 
+impl PrettyDisplay for FunSymbol {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}Fun [sig {}]", indent, self.sig)?;
+
+        for param in &self.params {
+            write!(f, " {}", param)?;
+        };
+
+        write!(f, "\n{}", self.body.borrow().pretty_indented(&next_indent))?;
+
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VarSymbol {
     pub val_type: Type,
     pub dims: Vec<ast::Expr>
 }
 
+impl PrettyDisplay for VarSymbol {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}Var {}", indent, self.val_type)?;
+
+        for dim in &self.dims {
+            write!(f, "\n{}", dim.pretty_indented(&next_indent))?;
+        };
+
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParamSymbol {
     pub val_type: Type
+}
+
+impl PrettyDisplay for ParamSymbol {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}Param {}", next_indent, self.val_type)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,12 +74,32 @@ pub enum SymbolType {
     Param(ParamSymbol)
 }
 
+impl PrettyDisplay for SymbolType {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        use symbol::SymbolType::*;
+        match *self {
+            Fun(ref sym) => write!(f, "{}", sym.pretty_indented(indent)),
+            Var(ref sym) => write!(f, "{}", sym.pretty_indented(indent)),
+            Param(ref sym) => write!(f, "{}", sym.pretty_indented(indent))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub id: usize,
     pub name: String,
     pub span: Span,
     pub node: SymbolType
+}
+
+impl PrettyDisplay for Symbol {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}Symbol {} {}\n{}", indent, self.name, self.id, self.node.pretty_indented(&next_indent))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +245,41 @@ pub enum Type {
     Array(Box<Type>, u32),
     Unresolved(Vec<Type>),
     Error
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use symbol::Type::*;
+        match *self {
+            Int => write!(f, "int")?,
+            Real => write!(f, "real")?,
+            Bool => write!(f, "bool")?,
+            Char => write!(f, "char")?,
+            Defined(id) => write!(f, "(typeref {})", id)?,
+            Array(ref inner_type, dims) => {
+                write!(f, "{}", inner_type)?;
+
+                for _ in 0..dims {
+                    write!(f, "[]")?;
+                };
+            },
+            Unresolved(ref possible_types) => {
+                write!(f, "one of {}", possible_types[0])?;
+
+                if possible_types.len() >= 3 {
+                    for i in 1..(possible_types.len() - 1) {
+                        write!(f, ", {}", possible_types[i])?;
+                    };
+
+                    write!(f, ", or {}", possible_types[possible_types.len() - 1])?;
+                } else {
+                    write!(f, " or {}", possible_types[1])?;
+                }
+            },
+            Error => write!(f, "(error type)")?
+        };
+        Result::Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

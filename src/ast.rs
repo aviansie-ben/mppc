@@ -48,6 +48,14 @@ impl PrettyDisplay for Block {
 
         write!(f, "{}Block", indent)?;
 
+        {
+            let symbols = self.symbols.borrow();
+
+            for (_, sym_id) in &symbols.symbol_names {
+                write!(f, "\n{}", symbols.symbols[&sym_id].pretty_indented(&next_indent))?;
+            };
+        };
+
         for decl in &self.decls {
             write!(f, "\n{}", decl.pretty_indented(&next_indent))?;
         };
