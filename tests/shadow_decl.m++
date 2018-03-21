@@ -1,0 +1,64 @@
+% These should conflict
+{
+    var x, x : int;
+};
+
+% These should conflict
+{
+    var x : int;
+    var x : int;
+};
+
+% These should conflict
+{
+    var x : int;
+    fun x() : int { return 3; };
+};
+
+% These should conflict
+{
+    fun f(x : int) : int {
+        var x : int;
+        return x;
+    };
+};
+
+% These should conflict
+{
+    data x = #NIL;
+    data x = #NIL;
+};
+
+% These should conflict
+{
+    data x = #NIL | #NIL;
+};
+
+% These should conflict
+{
+    data x = #NIL | #NIL of x;
+};
+
+% These should not conflict
+{
+    var x : int;
+    { var x : int; };
+};
+
+% These should not conflict
+{
+    data x = #NIL;
+    var x : x;
+};
+
+% These should not conflict and the proper constructors should be used
+{
+    data x = #NIL;
+    data y = #NIL;
+
+    var x : x;
+    var y : y;
+
+    x := #NIL;
+    y := #NIL;
+};

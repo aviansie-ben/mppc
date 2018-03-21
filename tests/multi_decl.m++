@@ -1,0 +1,10 @@
+/*
+ * Note that these multi-variable declarations are only syntactic sugar and will be turned into
+ * multiple unrelated declarations in the AST.
+ */
+var x, y, z[1][1] : int;
+
+read x;
+read y;
+z[0][0] := x + y * 2;
+print z[0][0];

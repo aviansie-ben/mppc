@@ -1,0 +1,17 @@
+var m, n : int;
+fun ackermann(m : int, n : int) : int {
+    var result : int;
+
+    if m = 0 then {
+        result := n + 1;
+    } else if m > 0 && n = 0 then {
+        result := ackermann(m - 1, 1);
+    } else {
+        result := ackermann(m - 1, ackermann(m, n - 1));
+    };
+    return result;
+};
+
+read m;
+read n;
+print ackermann(m, n);

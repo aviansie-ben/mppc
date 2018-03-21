@@ -1,0 +1,28 @@
+data intlist = #NIL | #CONS of int * intlist;
+
+var list : intlist;
+var continue : bool;
+var next : int;
+
+list := #NIL;
+
+read continue;
+while continue do {
+    read next;
+    list := #CONS(next, list);
+
+    read continue;
+};
+
+continue := true;
+while continue do {
+    case list of {
+        #NIL => {
+            continue := false;
+        } |
+        #CONS(x, xs) => {
+            print x;
+            list := xs;
+        }
+    };
+};
