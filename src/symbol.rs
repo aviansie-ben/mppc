@@ -106,6 +106,7 @@ impl PrettyDisplay for Symbol {
 pub struct SymbolTable {
     pub symbol_names: HashMap<String, usize>,
     pub type_names: HashMap<String, (usize, Span)>,
+    pub ctor_names: HashMap<String, Vec<(usize, usize)>>,
     pub symbols: HashMap<usize, Symbol>,
     pub parent: Option<Rc<RefCell<SymbolTable>>>,
     next_id: Rc<Cell<usize>>
@@ -116,6 +117,7 @@ impl SymbolTable {
         SymbolTable {
             symbol_names: HashMap::new(),
             type_names: HashMap::new(),
+            ctor_names: HashMap::new(),
             symbols: HashMap::new(),
             parent: None,
             next_id: Rc::new(Cell::new(0))
@@ -151,6 +153,27 @@ impl SymbolTable {
 
     pub fn add_type(&mut self, name: String, id: usize, span: Span) -> () {
         self.type_names.insert(name, (id, span));
+    }
+
+    pub fn add_ctor(&mut self, name: String, ctor: (usize, usize)) -> () {
+        if let Some(ctors) = self.ctor_names.get_mut(&name) {
+            ctors.push(ctor);
+            return;
+        };
+
+        let mut ctors = if let Some(ref parent) = self.parent {
+            // These let bindings are necessary in order to ensure that these values are dropped in
+            // the correct order.
+            let parent = parent.borrow();
+            let ctors = parent.find_ctors(&name).map(|ctors| (&*ctors).clone()).unwrap_or_else(|| vec![]);
+
+            ctors
+        } else {
+            vec![]
+        };
+
+        ctors.push(ctor);
+        self.ctor_names.insert(name, ctors);
     }
 
     pub fn find_symbol(&self, id: usize) -> Option<ChainRef<Symbol>> {
@@ -196,6 +219,19 @@ impl SymbolTable {
             Some(type_id)
         } else if let Some(ref parent) = self.parent {
             parent.borrow().find_named_type(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_ctors(&self, name: &str) -> Option<ChainRef<Vec<(usize, usize)>>> {
+        if let Some(ctors) = self.ctor_names.get(name) {
+            Some(ChainRef::new(ctors))
+        } else if let Some(ref parent) = self.parent {
+            ChainRef::and_then_one_option(
+                parent.borrow(),
+                |p| p.find_ctors(name)
+            )
         } else {
             None
         }
@@ -317,22 +353,6 @@ impl TypeDefinitionTable {
             return_type: return_type.clone()
         }))
     }
-
-    pub fn find_ctors(&self, name: &str, symtab: &SymbolTable, ctors: &mut Vec<(usize, usize)>) -> () {
-        for (_, (id, _)) in &symtab.type_names {
-            if let TypeDefinition::Data(td) = &self.defs[*id] {
-                for (ctor_id, ctor) in td.ctors.iter().enumerate() {
-                    if &ctor.name == name {
-                        ctors.push((*id, ctor_id));
-                    };
-                };
-            };
-        };
-
-        if let Some(ref parent) = symtab.parent {
-            self.find_ctors(name, &parent.borrow(), ctors);
-        };
-    }
 }
 
 fn resolve_type(
@@ -426,6 +446,10 @@ fn create_symbol_for_decl(
 
             for i in bad_ctors.into_iter().rev() {
                 type_def.ctors.remove(i);
+            };
+
+            for (i, ctor) in type_def.ctors.iter().enumerate() {
+                symbols.add_ctor(ctor.name.clone(), (type_id, i));
             };
 
             tdt.redefine(type_id, TypeDefinition::Data(type_def));
