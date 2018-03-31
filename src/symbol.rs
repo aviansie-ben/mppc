@@ -93,6 +93,16 @@ pub struct Symbol {
     pub node: SymbolType
 }
 
+impl Symbol {
+    fn val_type(&self) -> Type {
+        match self.node {
+            SymbolType::Fun(ref sym) => Type::Defined(sym.sig),
+            SymbolType::Var(ref sym) => sym.val_type.clone(),
+            SymbolType::Param(ref sym) => sym.val_type.clone()
+        }
+    }
+}
+
 impl PrettyDisplay for Symbol {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
         let mut next_indent = indent.to_string();
@@ -288,8 +298,79 @@ pub enum Type {
 pub struct PrettyType<'a>(&'a Type, &'a TypeDefinitionTable);
 
 impl Type {
+    fn is_resolved(&self) -> bool {
+        match *self {
+            Type::Unresolved(_) => false,
+            Type::Unknown => false,
+            _ => true
+        }
+    }
+
+    fn least_upper_bound(t1: &Type, t2: &Type) -> Option<Type> {
+        if t1 == &Type::Error || t2 == &Type::Error {
+            Some(Type::Error)
+        } else if t1 == t2 {
+            Some(t1.clone())
+        } else if let (Type::Unresolved(ref t1s), Type::Unresolved(ref t2s)) = (t1, t2) {
+            let mut ts: Vec<_> = t1s.iter().filter(|t| t2s.contains(t)).map(|t| t.clone()).collect();
+
+            if ts.len() == 0 {
+                None
+            } else if ts.len() == 1 {
+                Some(mem::replace(&mut ts[0], Type::Unknown))
+            } else {
+                Some(Type::Unresolved(ts))
+            }
+        } else if let Type::Unresolved(ref t1s) = t1 {
+            if t1s.contains(t2) {
+                Some(t2.clone())
+            } else {
+                None
+            }
+        } else if let Type::Unresolved(ref t2s) = t2 {
+            if t2s.contains(t1) {
+                Some(t1.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn can_convert_to(&self, t: &Type) -> bool {
+        Type::least_upper_bound(self, t).is_some()
+    }
+
+    fn can_convert_to_exact(&self, t: &Type) -> bool {
+        self == t || self == &Type::Error || t == &Type::Error
+    }
+
     fn pretty<'a>(&'a self, tdt: &'a TypeDefinitionTable) -> PrettyType<'a> {
         PrettyType(self, tdt)
+    }
+
+    fn union<T: IntoIterator<Item=Type>>(types: T) -> Type {
+        fn do_union<T: IntoIterator<Item=Type>>(types: T, result: &mut Vec<Type>) {
+            let types = types.into_iter();
+
+            for t in types {
+                match t {
+                    Type::Unresolved(ts) => do_union(ts, result),
+                    t => if !result.contains(&t) { result.push(t); }
+                };
+            };
+        }
+
+        let mut result: Vec<Type> = Vec::new();
+
+        do_union(types, &mut result);
+
+        if result.len() == 0 || result.iter().any(|t| t == &Type::Error) {
+            Type::Error
+        } else {
+            Type::Unresolved(result)
+        }
     }
 }
 
