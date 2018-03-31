@@ -381,10 +381,10 @@ pub enum ExprType {
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOp, Box<Expr>),
     Size(Box<Expr>, u32),
-    Id(String),
+    Id(String, usize),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
-    Cons(String, Vec<Expr>),
+    Cons(String, Vec<Expr>, usize),
     Int(i32),
     Real(f64),
     Bool(bool),
@@ -468,7 +468,7 @@ impl Expr {
     }
 
     pub fn identifier(id: String) -> Expr {
-        Expr::new(ExprType::Id(id))
+        Expr::new(ExprType::Id(id, !0))
     }
 
     pub fn call(func: Expr, args: Vec<Expr>) -> Expr {
@@ -480,7 +480,7 @@ impl Expr {
     }
 
     pub fn cons(cid: String, args: Vec<Expr>) -> Expr {
-        Expr::new(ExprType::Cons(cid, args))
+        Expr::new(ExprType::Cons(cid, args, !0))
     }
 
     pub fn int(val: i32) -> Expr {
@@ -545,7 +545,7 @@ impl PrettyDisplay for Expr {
                     val.pretty_indented(&next_indent)
                 )?;
             },
-            Id(ref id) => {
+            Id(ref id, ref sym_id) => {
                 write!(
                     f,
                     "{}Id {}",
@@ -573,7 +573,7 @@ impl PrettyDisplay for Expr {
                     ind.pretty_indented(&next_indent)
                 )?;
             },
-            Cons(ref cid, ref args) => {
+            Cons(ref cid, ref args, ref ctor_id) => {
                 write!(f, "{}Cons #{}", indent, cid)?;
                 for a in args {
                     write!(f, "\n{}", a.pretty_indented(&next_indent))?;
@@ -591,14 +591,16 @@ impl PrettyDisplay for Expr {
 #[derive(Debug, Clone)]
 pub struct Case {
     pub cid: String,
+    pub ctor_id: usize,
     pub vars: Vec<(String, Span)>,
+    pub var_bindings: Vec<usize>,
     pub stmt: Stmt,
     pub span: Span
 }
 
 impl Case {
     pub fn new(cid: String, vars: Vec<(String, Span)>, stmt: Stmt) -> Case {
-        Case { cid: cid, vars: vars, stmt: stmt, span: Span::dummy() }
+        Case { cid: cid, ctor_id: !0, vars: vars, var_bindings: Vec::new(), stmt: stmt, span: Span::dummy() }
     }
 
     pub fn at(mut self, span: Span) -> Case {

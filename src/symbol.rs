@@ -755,8 +755,9 @@ fn do_analyze_expression(
             };
             return Type::Int;
         },
-        ast::ExprType::Id(ref name) => {
+        ast::ExprType::Id(ref name, ref mut sym_id) => {
             return if let Some(sym) = symbols.find_named_symbol(name) {
+                *sym_id = sym.id;
                 sym.val_type()
             } else {
                 errors.push((
@@ -831,7 +832,7 @@ fn do_analyze_expression(
                 return Type::Error;
             };
         },
-        ast::ExprType::Cons(ref name, ref mut params) => {
+        ast::ExprType::Cons(ref name, ref mut params, ref mut expr_ctor_id) => {
             if expr.val_type == Type::Unknown {
                 for param in params.iter_mut() {
                     analyze_expression(param, tdt, symbols, None, errors);
@@ -856,6 +857,7 @@ fn do_analyze_expression(
                 };
 
                 analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                *expr_ctor_id = ctor_id.1;
                 return Type::Defined(ctor_id.0);
             } else {
                 if let Some(Type::Defined(expected_type)) = expected_type {
@@ -868,6 +870,7 @@ fn do_analyze_expression(
                         };
 
                         analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                        *expr_ctor_id = ctor_id.1;
                         return Type::Defined(ctor_id.0);
                     };
                 };
@@ -891,6 +894,7 @@ fn do_analyze_expression(
                     let (ctor, ctor_id) = ctors[0];
 
                     analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                    *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 }
 
@@ -912,13 +916,15 @@ fn do_analyze_expression(
                     ));
                     return Type::Error;
                 } else if valid_ctors.len() == 1 {
-                    analyze_call_signature(&expr.span, &valid_ctors[0].0.args, params, tdt, symbols, errors);
-                    return Type::Defined((valid_ctors[0].1).0);
+                    let (ctor, ctor_id) = valid_ctors[0];
+                    analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                    *expr_ctor_id = ctor_id.1;
+                    return Type::Defined(ctor_id.0);
                 } else {
                     return Type::union(valid_ctors.into_iter().map(|&(_, (type_id, _))| {
                         Type::Defined(type_id)
                     }));
-                }
+                };
             };
         },
         ast::ExprType::Int(_) => return Type::Int,
@@ -1083,7 +1089,7 @@ fn analyze_statement(
                     };
 
                     if define {
-                        sub_symbols.add_symbol(Symbol {
+                        case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                             id: 0,
                             name: name,
                             span: span,
@@ -1091,7 +1097,9 @@ fn analyze_statement(
                                 val_type: Type::Error,
                                 dims: vec![]
                             })
-                        });
+                        }));
+                    } else {
+                        case.var_bindings.push(!0);
                     };
                 };
             }
@@ -1102,7 +1110,7 @@ fn analyze_statement(
                 symbols: &Rc<RefCell<SymbolTable>>,
                 errors: &mut Vec<(String, Span)>
             ) {
-                let ctor = if let Some(ctor) = typedef.ctors.iter().find(|ctor| ctor.name == case.cid) {
+                let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(id, ctor)| ctor.name == case.cid) {
                     ctor
                 } else {
                     errors.push((
@@ -1117,6 +1125,8 @@ fn analyze_statement(
                     analyze_case_error(case, symbols, errors);
                     return;
                 };
+
+                case.ctor_id = ctor_id;
 
                 if ctor.args.len() != case.vars.len() {
                     errors.push((
@@ -1152,7 +1162,7 @@ fn analyze_statement(
                     };
 
                     if define {
-                        sub_symbols.add_symbol(Symbol {
+                        case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                             id: 0,
                             name: name,
                             span: span,
@@ -1160,7 +1170,9 @@ fn analyze_statement(
                                 val_type: val_type.clone(),
                                 dims: vec![]
                             })
-                        });
+                        }));
+                    } else {
+                        case.var_bindings.push(!0);
                     };
                 };
             }
