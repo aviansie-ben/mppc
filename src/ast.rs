@@ -380,7 +380,7 @@ impl fmt::Display for UnaryOp {
 pub enum ExprType {
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOp, Box<Expr>),
-    Size(String, u32),
+    Size(Box<Expr>, u32),
     Id(String),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
@@ -452,7 +452,7 @@ impl Expr {
     }
 
     pub fn size_of(id: String, array_derefs: u32) -> Expr {
-        Expr::new(ExprType::Size(id, array_derefs))
+        Expr::new(ExprType::Size(Box::new(Expr::identifier(id)), array_derefs))
     }
 
     pub fn float(val: Expr) -> Expr {
@@ -536,13 +536,13 @@ impl PrettyDisplay for Expr {
                     val.pretty_indented(&next_indent)
                 )?;
             },
-            Size(ref id, ref dims) => {
+            Size(ref val, ref dims) => {
                 write!(
                     f,
-                    "{}Size {} {}",
+                    "{}Size {}\n{}",
                     indent,
-                    id,
-                    dims
+                    dims,
+                    val.pretty_indented(&next_indent)
                 )?;
             },
             Id(ref id) => {
