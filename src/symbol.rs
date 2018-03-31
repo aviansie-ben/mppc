@@ -677,6 +677,272 @@ fn create_symbol_for_decl(
     };
 }
 
+fn analyze_call_signature(
+    span: &Span,
+    expected_types: &[Type],
+    params: &mut [ast::Expr],
+    tdt: &TypeDefinitionTable,
+    symbols: &SymbolTable,
+    errors: &mut Vec<(String, Span)>
+) {
+    if params.len() != expected_types.len() {
+        errors.push((
+            format!(
+                "wrong number of arguments: expected {}, but found {}",
+                expected_types.len(),
+                params.len()
+            ),
+            *span
+        ));
+    };
+
+    for (et, param) in expected_types.iter().zip(params.iter_mut()) {
+        let at = &analyze_expression(param, tdt, symbols, Some(et), errors);
+
+        if !at.can_convert_to_exact(et) {
+            errors.push((
+                format!("cannot convert from {} to {}", at.pretty(tdt), et.pretty(tdt)),
+                param.span
+            ));
+        };
+    };
+}
+
+fn do_analyze_expression(
+    expr: &mut ast::Expr,
+    tdt: &TypeDefinitionTable,
+    symbols: &SymbolTable,
+    expected_type: Option<&Type>,
+    errors: &mut Vec<(String, Span)>
+) -> Type {
+    match expr.node {
+        ast::ExprType::BinaryOp(op, ref mut lhs, ref mut rhs) => {
+            let lhs_type = analyze_expression(lhs, tdt, symbols, None, errors);
+            let rhs_type = analyze_expression(rhs, tdt, symbols, None, errors);
+
+            // TODO Allow binary operators
+            errors.push((
+                "binary operators are not yet implemented".to_string(),
+                expr.span
+            ));
+            return Type::Error;
+        },
+        ast::ExprType::UnaryOp(op, ref mut val) => {
+            let val_type = analyze_expression(val, tdt, symbols, None, errors);
+
+            // TODO Allow unary operators
+            errors.push((
+                "unary operators are not yet implemented".to_string(),
+                expr.span
+            ));
+            return Type::Error;
+        },
+        ast::ExprType::Size(ref mut val, dim) => {
+            let val_type = analyze_expression(val, tdt, symbols, None, errors);
+
+            if let Type::Array(_, val_dims) = val_type {
+                if dim >= val_dims {
+                    errors.push((
+                        format!("cannot get the size of dimension {} of a value of type {}", dim, val_type.pretty(tdt)),
+                        expr.span
+                    ));
+                };
+            } else {
+                errors.push((
+                    format!("cannot use size operator on value of type {}", val_type.pretty(tdt)),
+                    expr.span
+                ));
+            };
+            return Type::Int;
+        },
+        ast::ExprType::Id(ref name) => {
+            return if let Some(sym) = symbols.find_named_symbol(name) {
+                sym.val_type()
+            } else {
+                errors.push((
+                    format!("no variable '{}' exists in this scope", name),
+                    expr.span
+                ));
+                Type::Error
+            };
+        },
+        ast::ExprType::Call(ref mut func, ref mut params) => {
+            fn get_function_typedefs<'a>(
+                t: &Type,
+                tdt: &'a TypeDefinitionTable
+            ) -> Vec<(usize, &'a FunctionTypeDefinition)> {
+                if let Type::Defined(ref type_id) = *t {
+                    if let TypeDefinition::Function(ref typedef) = tdt.defs[*type_id] {
+                        vec![(*type_id, typedef)]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
+            let func_type = analyze_expression(func, tdt, symbols, None, errors);
+
+            if expr.val_type == Type::Unknown {
+                for param in params.iter_mut() {
+                    analyze_expression(param, tdt, symbols, None, errors);
+                };
+            };
+
+            let typedefs = get_function_typedefs(&func_type, tdt);
+
+            if typedefs.len() == 0 {
+                errors.push((
+                    format!("cannot call expression of type {}", func_type.pretty(tdt)),
+                    expr.span
+                ));
+                return Type::Error;
+            } else if typedefs.len() == 1 {
+                analyze_call_signature(&expr.span, &typedefs[0].1.params, params, tdt, symbols, errors);
+                return typedefs[0].1.return_type.clone();
+            } else {
+                // TODO Allow function overloading
+                return Type::Error;
+            };
+        },
+        ast::ExprType::Index(ref mut val, ref mut index) => {
+            let val_type = analyze_expression(val, tdt, symbols, None, errors);
+            let index_type = analyze_expression(index, tdt, symbols, Some(&Type::Int), errors);
+
+            if !index_type.can_convert_to_exact(&Type::Int) {
+                errors.push((
+                    format!("cannot convert from {} to int", index_type.pretty(tdt)),
+                    index.span
+                ));
+            };
+
+            if let Type::Array(inner_type, dims) = val_type {
+                return if dims == 1 {
+                    *inner_type
+                } else {
+                    Type::Array(inner_type, dims - 1)
+                };
+            } else {
+                errors.push((
+                    format!("cannot index into value of type {}", val_type.pretty(tdt)),
+                    expr.span
+                ));
+                return Type::Error;
+            };
+        },
+        ast::ExprType::Cons(ref name, ref mut params) => {
+            if expr.val_type == Type::Unknown {
+                for param in params.iter_mut() {
+                    analyze_expression(param, tdt, symbols, None, errors);
+                };
+            };
+
+            let ctors = if let Some(ctors) = symbols.find_ctors(name) {
+                ctors
+            } else {
+                errors.push((
+                    format!("no constructor #{} has been declared in this scope", name),
+                    expr.span
+                ));
+                return Type::Error;
+            };
+
+            if ctors.len() == 1 {
+                let ctor_id = ctors[0];
+                let ctor = match tdt.defs[ctor_id.0] {
+                    TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
+                    _ => panic!("invalid data type")
+                };
+
+                analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                return Type::Defined(ctor_id.0);
+            } else {
+                if let Some(Type::Defined(expected_type)) = expected_type {
+                    let ctor_id = ctors.iter().find(|ctor_id| &ctor_id.0 == expected_type);
+
+                    if let Some(ctor_id) = ctor_id {
+                        let ctor = match tdt.defs[ctor_id.0] {
+                            TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
+                            _ => panic!("invalid data type")
+                        };
+
+                        analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                        return Type::Defined(ctor_id.0);
+                    };
+                };
+
+                let ctors: Vec<_> = ctors.iter().map(|ctor_id| {
+                    let ctor = match tdt.defs[ctor_id.0] {
+                        TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
+                        _ => panic!("invalid data type")
+                    };
+
+                    (ctor, *ctor_id)
+                }).filter(|(ctor, _)| ctor.args.len() == params.len()).collect();
+
+                if ctors.len() == 0 {
+                    errors.push((
+                        format!("no constructor #{} in this scope takes {} arguments", name, params.len()),
+                        expr.span
+                    ));
+                    return Type::Error;
+                } else if ctors.len() == 1 {
+                    let (ctor, ctor_id) = ctors[0];
+
+                    analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
+                    return Type::Defined(ctor_id.0);
+                }
+
+                let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
+                let valid_ctors: Vec<_> = ctors.iter().filter(|&&(ctor, _)| {
+                    for (et, at) in ctor.args.iter().zip(param_types.iter()) {
+                        if !at.can_convert_to(et) {
+                            return false;
+                        };
+                    };
+                    true
+                }).collect();
+
+                if valid_ctors.len() == 0 {
+                    // TODO Better error message
+                    errors.push((
+                        format!("no constructor #{} in this scope matches the given arguments", name),
+                        expr.span
+                    ));
+                    return Type::Error;
+                } else if valid_ctors.len() == 1 {
+                    analyze_call_signature(&expr.span, &valid_ctors[0].0.args, params, tdt, symbols, errors);
+                    return Type::Defined((valid_ctors[0].1).0);
+                } else {
+                    return Type::union(valid_ctors.into_iter().map(|&(_, (type_id, _))| {
+                        Type::Defined(type_id)
+                    }));
+                }
+            };
+        },
+        ast::ExprType::Int(_) => return Type::Int,
+        ast::ExprType::Real(_) => return Type::Real,
+        ast::ExprType::Bool(_) => return Type::Bool,
+        ast::ExprType::Char(_) => return Type::Char
+    };
+}
+
+fn analyze_expression(
+    expr: &mut ast::Expr,
+    tdt: &TypeDefinitionTable,
+    symbols: &SymbolTable,
+    expected_type: Option<&Type>,
+    errors: &mut Vec<(String, Span)>
+) -> Type {
+    if expr.val_type.is_resolved() {
+        return expr.val_type.clone();
+    };
+
+    expr.val_type = do_analyze_expression(expr, tdt, symbols, expected_type, errors);
+    expr.val_type.clone()
+}
+
 fn analyze_statement(
     stmt: &mut ast::Stmt,
     tdt: &mut TypeDefinitionTable,
