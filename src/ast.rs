@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use lex::Span;
 use symbol;
-use util::PrettyDisplay;
+use util::{DeferredDisplay, PrettyDisplay};
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -516,13 +516,22 @@ impl PrettyDisplay for Expr {
         let mut next_indent = indent.to_string();
         next_indent.push_str(" ");
 
+        let meta_display = DeferredDisplay(|f| {
+            if self.val_type != symbol::Type::Unknown {
+                write!(f, " [TYPE: {}]", self.val_type)
+            } else {
+                Result::Ok(())
+            }
+        });
+
         match self.node {
             BinaryOp(op, ref lhs, ref rhs) => {
                 write!(
                     f,
-                    "{}{}\n{}\n{}",
+                    "{}{}{}\n{}\n{}",
                     indent,
                     op,
+                    meta_display,
                     lhs.pretty_indented(&next_indent),
                     rhs.pretty_indented(&next_indent)
                 )?;
@@ -530,34 +539,38 @@ impl PrettyDisplay for Expr {
             UnaryOp(op, ref val) => {
                 write!(
                     f,
-                    "{}{}\n{}",
+                    "{}{}{}\n{}",
                     indent,
                     op,
+                    meta_display,
                     val.pretty_indented(&next_indent)
                 )?;
             },
             Size(ref val, ref dims) => {
                 write!(
                     f,
-                    "{}Size {}\n{}",
+                    "{}Size {}{}\n{}",
                     indent,
                     dims,
+                    meta_display,
                     val.pretty_indented(&next_indent)
                 )?;
             },
             Id(ref id, ref sym_id) => {
                 write!(
                     f,
-                    "{}Id {}",
+                    "{}Id {}{}",
                     indent,
-                    id
+                    id,
+                    meta_display
                 )?;
             },
             Call(ref func, ref args) => {
                 write!(
                     f,
-                    "{}Call\n{}",
+                    "{}Call{}\n{}",
                     indent,
+                    meta_display,
                     func.pretty_indented(&next_indent)
                 )?;
                 for a in args {
@@ -567,22 +580,28 @@ impl PrettyDisplay for Expr {
             Index(ref arr, ref ind) => {
                 write!(
                     f,
-                    "{}Index\n{}\n{}",
+                    "{}Index{}\n{}\n{}",
                     indent,
+                    meta_display,
                     arr.pretty_indented(&next_indent),
                     ind.pretty_indented(&next_indent)
                 )?;
             },
-            Cons(ref cid, ref args, ref ctor_id) => {
-                write!(f, "{}Cons #{}", indent, cid)?;
+            Cons(ref cid, ref args, ctor_id) => {
+                write!(f, "{}Cons #{}{}", indent, cid, meta_display)?;
+
+                if ctor_id != !0 {
+                    write!(f, " [CTOR: {}]", ctor_id)?;
+                };
+
                 for a in args {
                     write!(f, "\n{}", a.pretty_indented(&next_indent))?;
                 };
             },
-            Int(ref val) => write!(f, "{}Int {}", indent, val)?,
-            Real(ref val) => write!(f, "{}Real {}", indent, val)?,
-            Bool(ref val) => write!(f, "{}Bool {}", indent, val)?,
-            Char(ref val) => write!(f, "{}Char {:?}", indent, val)?
+            Int(ref val) => write!(f, "{}Int {}{}", indent, val, meta_display)?,
+            Real(ref val) => write!(f, "{}Real {}{}", indent, val, meta_display)?,
+            Bool(ref val) => write!(f, "{}Bool {}{}", indent, val, meta_display)?,
+            Char(ref val) => write!(f, "{}Char {:?}{}", indent, val, meta_display)?
         };
         Result::Ok(())
     }
@@ -622,7 +641,19 @@ impl PrettyDisplay for Case {
                 write!(f, ", {}", var)?;
             }
             write!(f, ")")?;
-        }
+        };
+
+        if self.var_bindings.len() != 0 {
+            write!(f, "(${}", self.var_bindings.first().unwrap())?;
+            for var in &self.var_bindings[1..] {
+                write!(f, ", ${}", var)?;
+            };
+            write!(f, ")")?;
+        };
+
+        if self.ctor_id != !0 {
+            write!(f, " [CTOR: {}]", self.ctor_id)?;
+        };
 
         write!(f, "\n{}", self.stmt.pretty_indented(&next_indent))?;
 

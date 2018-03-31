@@ -206,3 +206,12 @@ impl <'a, T: fmt::Display + 'static> fmt::Display for ChainRef<'a, T> {
         write!(f, "{}", self.val)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct DeferredDisplay<T: Fn (&mut fmt::Formatter) -> fmt::Result>(pub T);
+
+impl <T: Fn (&mut fmt::Formatter) -> fmt::Result> fmt::Display for DeferredDisplay<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0(f)
+    }
+}
