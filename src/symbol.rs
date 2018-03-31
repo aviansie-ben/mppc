@@ -943,6 +943,22 @@ fn analyze_expression(
     expr.val_type.clone()
 }
 
+fn get_statement_symbols(
+    stmt: &mut ast::Stmt
+) -> &Rc<RefCell<SymbolTable>> {
+    if let ast::StmtType::Block(ref block) = stmt.node {
+        return &block.symbols;
+    };
+
+    let old_stmt = mem::replace(stmt, ast::Stmt::block(ast::Block::new(Vec::new(), Vec::new())));
+    if let ast::StmtType::Block(ref mut block) = stmt.node {
+        block.stmts.push(old_stmt);
+        &block.symbols
+    } else {
+        unreachable!();
+    }
+}
+
 fn analyze_statement(
     stmt: &mut ast::Stmt,
     tdt: &mut TypeDefinitionTable,
@@ -952,44 +968,251 @@ fn analyze_statement(
 ) {
     match stmt.node {
         ast::StmtType::IfThenElse(ref mut cond, ref mut then_stmt, ref mut else_stmt) => {
-            // TODO Typecheck condition
+            let cond_type = analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            if !cond_type.can_convert_to_exact(&Type::Bool) {
+                errors.push((
+                    format!("cannot convert from {} to bool", cond_type.pretty(tdt)),
+                    cond.span
+                ));
+            };
 
             analyze_statement(then_stmt, tdt, symbols, expected_return, errors);
             analyze_statement(else_stmt, tdt, symbols, expected_return, errors);
         },
         ast::StmtType::WhileDo(ref mut cond, ref mut do_stmt) => {
-            // TODO Typecheck condition
+            let cond_type = analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            if !cond_type.can_convert_to_exact(&Type::Bool) {
+                errors.push((
+                    format!("cannot convert from {} to bool", cond_type.pretty(tdt)),
+                    cond.span
+                ));
+            };
 
             analyze_statement(do_stmt, tdt, symbols, expected_return, errors);
         },
         ast::StmtType::Read(ref mut loc) => {
-            // TODO Typecheck location
+            // TODO Fix location analysis
+            let val_type = analyze_expression(loc, tdt, &symbols.borrow(), None, errors);
+            let is_valid = match val_type {
+                Type::Bool => true,
+                Type::Char => true,
+                Type::Int => true,
+                Type::Real => true,
+                Type::Error => true,
+                _ => false
+            };
+
+            if !is_valid {
+                errors.push((
+                    format!("cannot read a value of type {}", val_type.pretty(tdt)),
+                    stmt.span
+                ));
+            };
         },
         ast::StmtType::Assign(ref mut loc, ref mut val) => {
-            // TODO Typecheck location
-            // TODO Typecheck value
+            // TODO Fix location analysis
+            let symbols = symbols.borrow();
+            let expected_type = analyze_expression(loc, tdt, &symbols, None, errors);
+            let actual_type = analyze_expression(val, tdt, &symbols, if expected_type.is_resolved() {
+                Some(&expected_type)
+            } else {
+                None
+            }, errors);
+
+            if !actual_type.can_convert_to_exact(&expected_type) {
+                errors.push((
+                    format!(
+                        "cannot convert from {} to {}",
+                        actual_type.pretty(tdt),
+                        expected_type.pretty(tdt)
+                    ),
+                    val.span
+                ));
+            };
         },
         ast::StmtType::Print(ref mut val) => {
-            // TODO Typecheck value
+            let val_type = analyze_expression(val, tdt, &symbols.borrow(), None, errors);
+            let is_valid = match val_type {
+                Type::Bool => true,
+                Type::Char => true,
+                Type::Int => true,
+                Type::Real => true,
+                Type::Error => true,
+                _ => false
+            };
+
+            if !is_valid {
+                errors.push((
+                    format!("cannot print a value of type {}", val_type.pretty(tdt)),
+                    stmt.span
+                ));
+            };
         },
         ast::StmtType::Block(ref mut inner_block) => {
-            inner_block.symbols.borrow_mut().set_parent(symbols.clone());
+            if inner_block.symbols.borrow().parent.is_none() {
+                inner_block.symbols.borrow_mut().set_parent(symbols.clone());
+            };
+
             populate_block_symbol_table(tdt, inner_block, expected_return, errors);
 
             inner_block.symbols.borrow_mut().lift_decls(&mut symbols.borrow_mut());
         },
         ast::StmtType::Case(ref mut val, ref mut cases) => {
-            // TODO Typecheck value
+            fn analyze_case_error(
+                case: &mut ast::Case,
+                symbols: &Rc<RefCell<SymbolTable>>,
+                errors: &mut Vec<(String, Span)>
+            ) {
+                let mut sub_symbols = get_statement_symbols(&mut case.stmt).borrow_mut();
+                sub_symbols.set_parent(symbols.clone());
+
+                for (name, span) in case.vars.drain(..) {
+                    let define = if let Some(old_sym) = sub_symbols.find_imm_named_symbol(&name) {
+                        errors.push((
+                            format!(
+                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
+                                name,
+                                old_sym.span.lo.line,
+                                old_sym.span.lo.col
+                            ),
+                            span
+                        ));
+                        false
+                    } else {
+                        true
+                    };
+
+                    if define {
+                        sub_symbols.add_symbol(Symbol {
+                            id: 0,
+                            name: name,
+                            span: span,
+                            node: SymbolType::Var(VarSymbol {
+                                val_type: Type::Error,
+                                dims: vec![]
+                            })
+                        });
+                    };
+                };
+            }
+
+            fn analyze_case(
+                case: &mut ast::Case,
+                typedef: &DataTypeDefinition,
+                symbols: &Rc<RefCell<SymbolTable>>,
+                errors: &mut Vec<(String, Span)>
+            ) {
+                let ctor = if let Some(ctor) = typedef.ctors.iter().find(|ctor| ctor.name == case.cid) {
+                    ctor
+                } else {
+                    errors.push((
+                        format!(
+                            "no constructor #{} exists for type {}",
+                            case.cid,
+                            typedef.name
+                        ),
+                        case.span
+                    ));
+
+                    analyze_case_error(case, symbols, errors);
+                    return;
+                };
+
+                if ctor.args.len() != case.vars.len() {
+                    errors.push((
+                        format!(
+                            "wrong number of arguments to destructure: expected {}, but found {}",
+                            ctor.args.len(),
+                            case.vars.len()
+                        ),
+                        case.span
+                    ));
+
+                    analyze_case_error(case, symbols, errors);
+                    return;
+                };
+
+                let mut sub_symbols = get_statement_symbols(&mut case.stmt).borrow_mut();
+                sub_symbols.set_parent(symbols.clone());
+
+                for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
+                    let define = if let Some(old_sym) = sub_symbols.find_imm_named_symbol(&name) {
+                        errors.push((
+                            format!(
+                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
+                                name,
+                                old_sym.span.lo.line,
+                                old_sym.span.lo.col
+                            ),
+                            span
+                        ));
+                        false
+                    } else {
+                        true
+                    };
+
+                    if define {
+                        sub_symbols.add_symbol(Symbol {
+                            id: 0,
+                            name: name,
+                            span: span,
+                            node: SymbolType::Var(VarSymbol {
+                                val_type: val_type.clone(),
+                                dims: vec![]
+                            })
+                        });
+                    };
+                };
+            }
+
+            {
+                let val_type = analyze_expression(val, tdt, &symbols.borrow(), None, errors);
+                let typedef = if let Type::Defined(ref type_id) = val_type {
+                    if let TypeDefinition::Data(ref typedef) = tdt.defs[*type_id] {
+                        Some(typedef)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(typedef) = typedef {
+                    for case in cases.iter_mut() {
+                        analyze_case(case, typedef, symbols, errors);
+                    };
+                } else {
+                    errors.push((
+                        format!("cannot pattern match on a value of type {}", val_type.pretty(tdt)),
+                        val.span
+                    ));
+
+                    for case in cases.iter_mut() {
+                        analyze_case_error(case, symbols, errors);
+                    };
+                };
+            };
 
             for case in cases {
-                // TODO Typecheck constructor
-                // TODO Define variables
-
                 analyze_statement(&mut case.stmt, tdt, symbols, expected_return, errors);
             };
         },
         ast::StmtType::Return(ref mut val) => {
-            // TODO Typecheck value
+            let val_type = analyze_expression(val, tdt, &symbols.borrow(), expected_return, errors);
+
+            if let Some(expected_return) = expected_return {
+                if !val_type.can_convert_to_exact(expected_return) {
+                    errors.push((
+                        format!("cannot convert from {} to {}", val_type.pretty(tdt), expected_return.pretty(tdt)),
+                        val.span
+                    ));
+                };
+            } else {
+                errors.push((
+                    "cannot return from outside a function".to_string(),
+                    stmt.span
+                ));
+            };
         }
     };
 }
