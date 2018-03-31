@@ -238,7 +238,7 @@ impl PrettyDisplay for DataCons {
 pub enum DeclType {
     Var(VarSpec, Type),
     Fun(String, FunSig, Block),
-    Data(String, Vec<DataCons>)
+    Data(String, usize, Vec<DataCons>)
 }
 
 #[derive(Debug, Clone)]
@@ -271,7 +271,7 @@ impl Decl {
     }
 
     pub fn data(name: String, ctors: Vec<DataCons>) -> Decl {
-        Decl::new(DeclType::Data(name, ctors))
+        Decl::new(DeclType::Data(name, !0, ctors))
     }
 
     pub fn at(mut self, span: Span) -> Decl {
@@ -307,7 +307,7 @@ impl PrettyDisplay for Decl {
                     block.pretty_indented(&next_indent)
                 )?;
             },
-            Data(ref id, ref ctors) => {
+            Data(ref id, _, ref ctors) => {
                 write!(f, "{}DataDecl {}", indent, id)?;
 
                 for ctor in ctors {

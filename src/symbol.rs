@@ -468,23 +468,7 @@ fn create_symbol_for_decl(
     decl: ast::Decl
 ) {
     match decl.node {
-        ast::DeclType::Data(name, ctors) => {
-            // Data types can be defined recursively, so we add a dummy definition now.
-            let type_id = tdt.add_definition(TypeDefinition::Dummy);
-            if let Some((_, old_type_span)) = symbols.find_imm_named_type(&name) {
-                errors.push((
-                    format!(
-                        "a type '{}' already exists in this scope (original definition is at line {}, col {})",
-                        name,
-                        old_type_span.lo.line,
-                        old_type_span.lo.col
-                    ),
-                    decl.span
-                ));
-            } else {
-                symbols.add_type(name.clone(), type_id, decl.span);
-            };
-
+        ast::DeclType::Data(name, type_id, ctors) => {
             let mut type_def = DataTypeDefinition {
                 name: name,
                 ctors: ctors.into_iter().map(|ctor| {
@@ -671,6 +655,31 @@ fn populate_block_symbol_table(
 ) {
     {
         let symbols = &mut block.symbols.borrow_mut();
+
+        // To achieve simultaneous declaration syntax, we need to set up some dummy type definitions
+        // before we can start processing the actual declarations. This is because types can be
+        // mutually recursive and constructor type information needs to be resolved as the data
+        // declaration is being processed. No such dummy definitions are needed for variables or
+        // functions since they can only be referenced from blocks and expressions, which aren't
+        // processed until after all declarations have been processed.
+        for decl in &mut block.decls {
+            if let ast::DeclType::Data(ref name, ref mut type_id, _) = decl.node {
+                *type_id = tdt.add_definition(TypeDefinition::Dummy);
+                if let Some((_, old_type_span)) = symbols.find_imm_named_type(&name) {
+                    errors.push((
+                        format!(
+                            "a type '{}' already exists in this scope (original definition is at line {}, col {})",
+                            name,
+                            old_type_span.lo.line,
+                            old_type_span.lo.col
+                        ),
+                        decl.span
+                    ));
+                } else {
+                    symbols.add_type(name.clone(), *type_id, decl.span);
+                };
+            }
+        }
 
         for decl in mem::replace(&mut block.decls, vec![]) {
             create_symbol_for_decl(tdt, symbols, errors, decl);
