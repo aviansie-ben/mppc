@@ -284,6 +284,15 @@ pub enum Type {
     Error
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PrettyType<'a>(&'a Type, &'a TypeDefinitionTable);
+
+impl Type {
+    fn pretty<'a>(&'a self, tdt: &'a TypeDefinitionTable) -> PrettyType<'a> {
+        PrettyType(self, tdt)
+    }
+}
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use symbol::Type::*;
@@ -301,16 +310,82 @@ impl fmt::Display for Type {
                 };
             },
             Unresolved(ref possible_types) => {
-                write!(f, "one of {}", possible_types[0])?;
-
-                if possible_types.len() >= 3 {
-                    for i in 1..(possible_types.len() - 1) {
-                        write!(f, ", {}", possible_types[i])?;
-                    };
-
-                    write!(f, ", or {}", possible_types[possible_types.len() - 1])?;
+                if possible_types.len() == 1 {
+                    write!(f, "{} (ambiguous)", possible_types[0])?;
                 } else {
-                    write!(f, " or {}", possible_types[1])?;
+                    write!(f, "one of {}", possible_types[0])?;
+
+                    if possible_types.len() >= 3 {
+                        for i in 1..(possible_types.len() - 1) {
+                            write!(f, ", {}", possible_types[i])?;
+                        };
+
+                        write!(f, ", or {}", possible_types[possible_types.len() - 1])?;
+                    } else {
+                        write!(f, " or {}", possible_types[1])?;
+                    }
+                };
+            },
+            Unknown => write!(f, "(unknown type)")?,
+            Error => write!(f, "(error type)")?
+        };
+        Result::Ok(())
+    }
+}
+
+impl <'a> fmt::Display for PrettyType<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use symbol::Type::*;
+        use symbol::TypeDefinition::*;
+
+        let PrettyType(t, tdt) = *self;
+
+        match *t {
+            Int => write!(f, "int")?,
+            Real => write!(f, "real")?,
+            Bool => write!(f, "bool")?,
+            Char => write!(f, "char")?,
+            Defined(id) => {
+                match tdt.defs[id] {
+                    Data(ref td) => write!(f, "{}", td.name)?,
+                    Function(ref td) => {
+                        write!(f, "fun (")?;
+
+                        if td.params.len() != 0 {
+                            write!(f, "{}", td.params[0].pretty(tdt))?;
+
+                            for p in &td.params[1..] {
+                                write!(f, ", {}", p.pretty(tdt))?;
+                            }
+                        }
+
+                        write!(f, ") : {}", td.return_type.pretty(tdt))?;
+                    },
+                    Dummy => write!(f, "(dummy type)")?
+                }
+            },
+            Array(ref inner_type, dims) => {
+                write!(f, "{}", inner_type.pretty(tdt))?;
+
+                for _ in 0..dims {
+                    write!(f, "[]")?;
+                };
+            },
+            Unresolved(ref possible_types) => {
+                if possible_types.len() == 1 {
+                    write!(f, "{}", possible_types[0].pretty(tdt))?;
+                } else {
+                    write!(f, "one of {}", possible_types[0].pretty(tdt))?;
+
+                    if possible_types.len() >= 3 {
+                        for i in 1..(possible_types.len() - 1) {
+                            write!(f, ", {}", possible_types[i].pretty(tdt))?;
+                        };
+
+                        write!(f, ", or {}", possible_types[possible_types.len() - 1].pretty(tdt))?;
+                    } else {
+                        write!(f, " or {}", possible_types[1].pretty(tdt))?;
+                    }
                 }
             },
             Unknown => write!(f, "(unknown type)")?,
