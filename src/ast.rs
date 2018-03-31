@@ -52,7 +52,7 @@ impl PrettyDisplay for Block {
             let symbols = self.symbols.borrow();
 
             for (_, sym_id) in &symbols.symbol_names {
-                write!(f, "\n{}", symbols.symbols[&sym_id].pretty_indented(&next_indent))?;
+                write!(f, "\n{}", symbols.find_symbol(*sym_id).unwrap().pretty_indented(&next_indent))?;
             };
         };
 
