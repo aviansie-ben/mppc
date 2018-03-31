@@ -400,7 +400,7 @@ pub struct Expr {
 
 impl Expr {
     pub fn new(node: ExprType) -> Expr {
-        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Error }
+        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Unknown }
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {

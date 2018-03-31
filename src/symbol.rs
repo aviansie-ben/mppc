@@ -280,6 +280,7 @@ pub enum Type {
     Defined(usize),
     Array(Box<Type>, u32),
     Unresolved(Vec<Type>),
+    Unknown,
     Error
 }
 
@@ -312,6 +313,7 @@ impl fmt::Display for Type {
                     write!(f, " or {}", possible_types[1])?;
                 }
             },
+            Unknown => write!(f, "(unknown type)")?,
             Error => write!(f, "(error type)")?
         };
         Result::Ok(())
