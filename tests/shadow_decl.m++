@@ -62,3 +62,16 @@
     x := #NIL;
     y := #NIL;
 };
+
+% The proper constructors should be inferred here such that the case statement matches using the d4
+% type
+{
+    data d1 = #CONS;
+    data d2 = #CONS;
+    data d3 = #CONS of d1 * d2;
+    data d4 = #CONS of d3 * d2;
+    data d5 = #CONS of d1 * d1;
+
+    %    d4   (d3   (d1   , d2   ), d2   )
+    case #CONS(#CONS(#CONS, #CONS), #CONS) of { #CONS(a, b) => {} };
+};
