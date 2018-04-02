@@ -196,7 +196,9 @@ parser! {
         Float LPar expr[e] RPar => Expr::float(e).at(span!()),
         Floor LPar expr[e] RPar => Expr::floor(e).at(span!()),
         Ceil LPar expr[e] RPar => Expr::ceil(e).at(span!()),
-        Id(id) LPar arg_list[args] RPar => Expr::call(Expr::identifier(id), args).at(span!()),
+        id_with_span[(id, id_span)] LPar arg_list[args] RPar => {
+            Expr::call(Expr::identifier(id).at(id_span), args).at(span!())
+        },
         id_with_span[(id, id_span)] expr_dims[args] => {
             let mut e = Expr::identifier(id).at(id_span);
 
