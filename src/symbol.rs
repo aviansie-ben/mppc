@@ -476,6 +476,120 @@ impl <'a> fmt::Display for PrettyType<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Unknown,
+    BoolNot,
+    IntFloat,
+    IntNeg,
+    RealFloor,
+    RealCeil,
+    RealNeg
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Unknown,
+    BoolOr,
+    BoolAnd,
+    BoolEq,
+    IntEq,
+    IntLt,
+    IntGt,
+    IntLe,
+    IntGe,
+    IntAdd,
+    IntSub,
+    IntMul,
+    IntDiv,
+    RealEq,
+    RealLt,
+    RealGt,
+    RealLe,
+    RealGe,
+    RealAdd,
+    RealSub,
+    RealMul,
+    RealDiv,
+    CharEq
+}
+
+lazy_static! {
+    static ref UNARY_OPS: HashMap<ast::UnaryOp, Vec<([Type; 1], Type, UnaryOp)>> = {
+        let mut m = HashMap::new();
+
+        m.insert(ast::UnaryOp::Not, vec![
+            ([Type::Bool], Type::Bool, UnaryOp::BoolNot)
+        ]);
+        m.insert(ast::UnaryOp::Float, vec![
+            ([Type::Int], Type::Real, UnaryOp::IntFloat)
+        ]);
+        m.insert(ast::UnaryOp::Floor, vec![
+            ([Type::Real], Type::Real, UnaryOp::RealFloor)
+        ]);
+        m.insert(ast::UnaryOp::Ceil, vec![
+            ([Type::Real], Type::Real, UnaryOp::RealCeil)
+        ]);
+        m.insert(ast::UnaryOp::Neg, vec![
+            ([Type::Int], Type::Int, UnaryOp::IntNeg),
+            ([Type::Real], Type::Real, UnaryOp::RealNeg)
+        ]);
+
+        m
+    };
+
+    static ref BINARY_OPS: HashMap<ast::BinaryOp, Vec<([Type; 2], Type, BinaryOp)>> = {
+        let mut m = HashMap::new();
+
+        m.insert(ast::BinaryOp::Or, vec![
+            ([Type::Bool, Type::Bool], Type::Bool, BinaryOp::BoolOr)
+        ]);
+        m.insert(ast::BinaryOp::And, vec![
+            ([Type::Bool, Type::Bool], Type::Bool, BinaryOp::BoolAnd)
+        ]);
+        m.insert(ast::BinaryOp::Equal, vec![
+            ([Type::Bool, Type::Bool], Type::Bool, BinaryOp::BoolEq),
+            ([Type::Int, Type::Int], Type::Bool, BinaryOp::IntEq),
+            ([Type::Real, Type::Real], Type::Bool, BinaryOp::RealEq),
+            ([Type::Char, Type::Char], Type::Bool, BinaryOp::CharEq)
+        ]);
+        m.insert(ast::BinaryOp::Lt, vec![
+            ([Type::Int, Type::Int], Type::Bool, BinaryOp::IntLt),
+            ([Type::Real, Type::Real], Type::Bool, BinaryOp::RealLt)
+        ]);
+        m.insert(ast::BinaryOp::Gt, vec![
+            ([Type::Int, Type::Int], Type::Bool, BinaryOp::IntGt),
+            ([Type::Real, Type::Real], Type::Bool, BinaryOp::RealGt)
+        ]);
+        m.insert(ast::BinaryOp::Le, vec![
+            ([Type::Int, Type::Int], Type::Bool, BinaryOp::IntLe),
+            ([Type::Real, Type::Real], Type::Bool, BinaryOp::RealLe)
+        ]);
+        m.insert(ast::BinaryOp::Ge, vec![
+            ([Type::Int, Type::Int], Type::Bool, BinaryOp::IntGe),
+            ([Type::Real, Type::Real], Type::Bool, BinaryOp::RealGe)
+        ]);
+        m.insert(ast::BinaryOp::Add, vec![
+            ([Type::Int, Type::Int], Type::Int, BinaryOp::IntAdd),
+            ([Type::Real, Type::Real], Type::Real, BinaryOp::RealAdd)
+        ]);
+        m.insert(ast::BinaryOp::Sub, vec![
+            ([Type::Int, Type::Int], Type::Int, BinaryOp::IntSub),
+            ([Type::Real, Type::Real], Type::Real, BinaryOp::RealSub)
+        ]);
+        m.insert(ast::BinaryOp::Mul, vec![
+            ([Type::Int, Type::Int], Type::Int, BinaryOp::IntMul),
+            ([Type::Real, Type::Real], Type::Real, BinaryOp::RealMul)
+        ]);
+        m.insert(ast::BinaryOp::Div, vec![
+            ([Type::Int, Type::Int], Type::Int, BinaryOp::IntDiv),
+            ([Type::Real, Type::Real], Type::Real, BinaryOp::RealDiv)
+        ]);
+
+        m
+    };
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeDefinitionTable {
     pub defs: Vec<TypeDefinition>
@@ -677,6 +791,21 @@ fn create_symbol_for_decl(
     };
 }
 
+fn get_valid_call_signatures<'a, T: IntoIterator<Item=&'a [Type]>>(
+    actual_types: &[Type],
+    expected_types: T
+) -> Vec<usize> {
+    let mut result = Vec::new();
+
+    for (i, expected_types) in expected_types.into_iter().enumerate() {
+        if expected_types.iter().zip(actual_types.iter()).all(|(et, at)| at.can_convert_to(et)) {
+            result.push(i);
+        };
+    };
+
+    result
+}
+
 fn analyze_call_signature(
     span: &Span,
     expected_types: &[Type],
@@ -716,26 +845,83 @@ fn do_analyze_expression(
     errors: &mut Vec<(String, Span)>
 ) -> Type {
     match expr.node {
-        ast::ExprType::BinaryOp(op, ref mut lhs, ref mut rhs) => {
-            let lhs_type = analyze_expression(lhs, tdt, symbols, None, errors);
-            let rhs_type = analyze_expression(rhs, tdt, symbols, None, errors);
+        ast::ExprType::BinaryOp(op, ref mut lhs, ref mut rhs, ref mut sym_op) => {
+            let val_types = [
+                analyze_expression(lhs, tdt, symbols, None, errors),
+                analyze_expression(rhs, tdt, symbols, None, errors)
+            ];
 
-            // TODO Allow binary operators
-            errors.push((
-                "binary operators are not yet implemented".to_string(),
-                expr.span
-            ));
-            return Type::Error;
+            if val_types[0] == Type::Error || val_types[1] == Type::Error {
+                return Type::Error;
+            };
+
+            let op_impl = if let Some(impls) = BINARY_OPS.get(&op) {
+                let valid_impls = get_valid_call_signatures(
+                    &val_types,
+                    impls.iter().map(|&(ref params, _, _)| { &params[..] })
+                );
+
+                if valid_impls.len() == 0 {
+                    None
+                } else if valid_impls.len() == 1 {
+                    Some(&impls[valid_impls[0]])
+                } else {
+                    return Type::union(valid_impls.iter().map(|&i| impls[i].1.clone()));
+                }
+            } else {
+                None
+            };
+
+            if let Some(&(ref params, ref result, op)) = op_impl {
+                analyze_expression(lhs, tdt, symbols, Some(&params[0]), errors);
+                analyze_expression(rhs, tdt, symbols, Some(&params[1]), errors);
+                *sym_op = op;
+
+                return result.clone();
+            } else {
+                errors.push((
+                    format!("no operator {} exists for {} and {}", op, val_types[0].pretty(tdt), val_types[0].pretty(tdt)),
+                    expr.span
+                ));
+                return Type::Error;
+            };
         },
-        ast::ExprType::UnaryOp(op, ref mut val) => {
-            let val_type = analyze_expression(val, tdt, symbols, None, errors);
+        ast::ExprType::UnaryOp(op, ref mut val, ref mut sym_op) => {
+            let val_types = [analyze_expression(val, tdt, symbols, None, errors)];
 
-            // TODO Allow unary operators
-            errors.push((
-                "unary operators are not yet implemented".to_string(),
-                expr.span
-            ));
-            return Type::Error;
+            if val_types[0] == Type::Error {
+                return Type::Error;
+            };
+
+            let op_impl = if let Some(impls) = UNARY_OPS.get(&op) {
+                let valid_impls = get_valid_call_signatures(
+                    &val_types,
+                    impls.iter().map(|&(ref params, _, _)| { &params[..] })
+                );
+
+                if valid_impls.len() == 0 {
+                    None
+                } else if valid_impls.len() == 1 {
+                    Some(&impls[valid_impls[0]])
+                } else {
+                    return Type::union(valid_impls.iter().map(|&i| impls[i].1.clone()));
+                }
+            } else {
+                None
+            };
+
+            if let Some(&(ref params, ref result, op)) = op_impl {
+                analyze_expression(val, tdt, symbols, Some(&params[0]), errors);
+                *sym_op = op;
+
+                return result.clone();
+            } else {
+                errors.push((
+                    format!("no operator {} exists for {}", op, val_types[0].pretty(tdt)),
+                    expr.span
+                ));
+                return Type::Error;
+            };
         },
         ast::ExprType::Size(ref mut val, dim) => {
             let val_type = analyze_expression(val, tdt, symbols, None, errors);

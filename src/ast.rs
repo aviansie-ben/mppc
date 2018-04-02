@@ -320,7 +320,7 @@ impl PrettyDisplay for Decl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Or,
     And,
@@ -339,22 +339,22 @@ impl fmt::Display for BinaryOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ast::BinaryOp::*;
         match self {
-            Or => write!(f, "Or"),
-            And => write!(f, "And"),
-            Equal => write!(f, "Equal"),
-            Lt => write!(f, "Lt"),
-            Gt => write!(f, "Gt"),
-            Le => write!(f, "Le"),
-            Ge => write!(f, "Ge"),
-            Add => write!(f, "Add"),
-            Sub => write!(f, "Sub"),
-            Mul => write!(f, "Mul"),
-            Div => write!(f, "Div")
+            Or => write!(f, "||"),
+            And => write!(f, "&&"),
+            Equal => write!(f, "="),
+            Lt => write!(f, "<"),
+            Gt => write!(f, ">"),
+            Le => write!(f, "=<"),
+            Ge => write!(f, ">="),
+            Add => write!(f, "+"),
+            Sub => write!(f, "-"),
+            Mul => write!(f, "*"),
+            Div => write!(f, "/")
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Not,
     Float,
@@ -367,19 +367,19 @@ impl fmt::Display for UnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ast::UnaryOp::*;
         match self {
-            Not => write!(f, "Not"),
-            Float => write!(f, "Float"),
-            Floor => write!(f, "Floor"),
-            Ceil => write!(f, "Ceil"),
-            Neg => write!(f, "Neg")
+            Not => write!(f, "not"),
+            Float => write!(f, "float"),
+            Floor => write!(f, "floor"),
+            Ceil => write!(f, "ceil"),
+            Neg => write!(f, "-")
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum ExprType {
-    BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
-    UnaryOp(UnaryOp, Box<Expr>),
+    BinaryOp(BinaryOp, Box<Expr>, Box<Expr>, symbol::BinaryOp),
+    UnaryOp(UnaryOp, Box<Expr>, symbol::UnaryOp),
     Size(Box<Expr>, u32),
     Id(String, usize),
     Call(Box<Expr>, Vec<Expr>),
@@ -404,51 +404,51 @@ impl Expr {
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Or, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Or, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn and(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::And, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::And, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn not(val: Expr) -> Expr {
-        Expr::new(ExprType::UnaryOp(UnaryOp::Not, Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Not, Box::new(val), symbol::UnaryOp::Unknown))
     }
 
     pub fn equal_to(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Equal, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Equal, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn less_than(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Lt, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Lt, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn greater_than(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Gt, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Gt, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn less_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Le, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Le, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn greater_than_or_equal(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Ge, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Ge, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn add(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Add, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Add, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn sub(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Sub, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Sub, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn mul(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Mul, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Mul, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn div(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::new(ExprType::BinaryOp(BinaryOp::Div, Box::new(lhs), Box::new(rhs)))
+        Expr::new(ExprType::BinaryOp(BinaryOp::Div, Box::new(lhs), Box::new(rhs), symbol::BinaryOp::Unknown))
     }
 
     pub fn size_of(id: String, array_derefs: u32) -> Expr {
@@ -456,15 +456,15 @@ impl Expr {
     }
 
     pub fn float(val: Expr) -> Expr {
-        Expr::new(ExprType::UnaryOp(UnaryOp::Float, Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Float, Box::new(val), symbol::UnaryOp::Unknown))
     }
 
     pub fn floor(val: Expr) -> Expr {
-        Expr::new(ExprType::UnaryOp(UnaryOp::Floor, Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Floor, Box::new(val), symbol::UnaryOp::Unknown))
     }
 
     pub fn ceil(val: Expr) -> Expr {
-        Expr::new(ExprType::UnaryOp(UnaryOp::Ceil, Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Ceil, Box::new(val), symbol::UnaryOp::Unknown))
     }
 
     pub fn identifier(id: String) -> Expr {
@@ -500,7 +500,7 @@ impl Expr {
     }
 
     pub fn negate(val: Expr) -> Expr {
-        Expr::new(ExprType::UnaryOp(UnaryOp::Neg, Box::new(val)))
+        Expr::new(ExprType::UnaryOp(UnaryOp::Neg, Box::new(val), symbol::UnaryOp::Unknown))
     }
 
     pub fn at(mut self, span: Span) -> Expr {
@@ -525,10 +525,17 @@ impl PrettyDisplay for Expr {
         });
 
         match self.node {
-            BinaryOp(op, ref lhs, ref rhs) => {
+            BinaryOp(op, ref lhs, ref rhs, sym_op) => {
+                let meta_display = DeferredDisplay(|f| {
+                    if sym_op != symbol::BinaryOp::Unknown {
+                        write!(f, "{} [OP: {:?}]", meta_display, sym_op)
+                    } else {
+                        write!(f, "{}", meta_display)
+                    }
+                });
                 write!(
                     f,
-                    "{}{}{}\n{}\n{}",
+                    "{}{:?}{}\n{}\n{}",
                     indent,
                     op,
                     meta_display,
@@ -536,10 +543,17 @@ impl PrettyDisplay for Expr {
                     rhs.pretty_indented(&next_indent)
                 )?;
             },
-            UnaryOp(op, ref val) => {
+            UnaryOp(op, ref val, sym_op) => {
+                let meta_display = DeferredDisplay(|f| {
+                    if sym_op != symbol::UnaryOp::Unknown {
+                        write!(f, "{} [OP: {:?}]", meta_display, sym_op)
+                    } else {
+                        write!(f, "{}", meta_display)
+                    }
+                });
                 write!(
                     f,
-                    "{}{}{}\n{}",
+                    "{}{:?}{}\n{}",
                     indent,
                     op,
                     meta_display,
@@ -556,7 +570,14 @@ impl PrettyDisplay for Expr {
                     val.pretty_indented(&next_indent)
                 )?;
             },
-            Id(ref id, ref sym_id) => {
+            Id(ref id, sym_id) => {
+                let meta_display = DeferredDisplay(|f| {
+                    if sym_id != !0 {
+                        write!(f, "{} [SYM: {}]", meta_display, sym_id)
+                    } else {
+                        write!(f, "{}", meta_display)
+                    }
+                });
                 write!(
                     f,
                     "{}Id {}{}",

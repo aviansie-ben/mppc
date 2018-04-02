@@ -5,6 +5,7 @@
 
 extern crate clap;
 extern crate itertools;
+#[macro_use] extern crate lazy_static;
 
 use clap::{App,AppSettings,Arg,ArgMatches,SubCommand};
 use std::collections::HashSet;

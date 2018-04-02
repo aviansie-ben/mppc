@@ -7,3 +7,4 @@ authors = ["Benjamin Thomas (Aviansie Ben) <ben@benthomas.ca>"]
 clap = "2.29.2"
 plex = { path = "plex" }
 itertools = "0.7.3"
+lazy_static = "1.0.0"

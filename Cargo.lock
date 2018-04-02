@@ -67,6 +67,11 @@ version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "lazy_static"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "libc"
 version = "0.2.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -77,6 +82,7 @@ version = "0.1.0"
 dependencies = [
  "clap 2.31.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "plex 0.0.3",
 ]
 
@@ -177,6 +183,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum either 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "740178ddf48b1a9e878e6d6509a1442a2d42fd2928aae8e7a6f8a36fb01981b3"
 "checksum itertools 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)" = "23d53b4c7394338044c3b9c8c5b2caaf7b40ae049ecd321578ebdc2e13738cd1"
 "checksum lalr 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "106d7548f95adbe3019b4fc4954554d7b72535867aa9ce326d2f766b68958de7"
+"checksum lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c8f31047daa365f19be14b47c29df4f7c3b581832407daabe6ae77397619237d"
 "checksum libc 0.2.39 (registry+https://github.com/rust-lang/crates.io-index)" = "f54263ad99207254cf58b5f701ecb432c717445ea2ee8af387334bdd1a03fdff"
 "checksum redfa 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "29cc2771cc9f5fb0061cdedc05a37170254694dffec6b89920a6e767f08c4220"
 "checksum redox_syscall 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)" = "0d92eecebad22b767915e4d529f89f28ee96dbbf5a4810d2b844373f136417fd"
