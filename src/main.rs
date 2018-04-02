@@ -239,8 +239,8 @@ fn analyze_command<'a>(args: &ArgMatches<'a>) {
     tokens.finish(&mut errors);
     print_errors(&mut errors);
 
-    if errors.is_empty() {
-        println!("{}", parse_result.unwrap().pretty());
+    if let Result::Ok(parse_result) = parse_result {
+        println!("{}", parse_result.pretty());
     }
 }
 
