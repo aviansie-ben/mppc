@@ -33,6 +33,23 @@ impl PrettyDisplay for FunSymbol {
 }
 
 #[derive(Debug, Clone)]
+pub struct MultiFunSymbol {
+    pub funcs: RefCell<Vec<(usize, usize)>>
+}
+
+impl PrettyDisplay for MultiFunSymbol {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}MultiFun", indent)?;
+
+        for &(_, id) in self.funcs.borrow().iter() {
+            write!(f, " {}", id)?;
+        };
+
+        Result::Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct VarSymbol {
     pub val_type: Type,
     pub dims: RefCell<Vec<ast::Expr>>
@@ -70,6 +87,7 @@ impl PrettyDisplay for ParamSymbol {
 #[derive(Debug, Clone)]
 pub enum SymbolType {
     Fun(FunSymbol),
+    MultiFun(MultiFunSymbol),
     Var(VarSymbol),
     Param(ParamSymbol)
 }
@@ -79,6 +97,7 @@ impl PrettyDisplay for SymbolType {
         use symbol::SymbolType::*;
         match *self {
             Fun(ref sym) => write!(f, "{}", sym.pretty_indented(indent)),
+            MultiFun(ref sym) => write!(f, "{}", sym.pretty_indented(indent)),
             Var(ref sym) => write!(f, "{}", sym.pretty_indented(indent)),
             Param(ref sym) => write!(f, "{}", sym.pretty_indented(indent))
         }
@@ -97,6 +116,9 @@ impl Symbol {
     fn val_type(&self) -> Type {
         match self.node {
             SymbolType::Fun(ref sym) => Type::Defined(sym.sig),
+            SymbolType::MultiFun(ref sym) => Type::union(
+                sym.funcs.borrow().iter().map(|&(type_id, _)| Type::Defined(type_id))
+            ),
             SymbolType::Var(ref sym) => sym.val_type.clone(),
             SymbolType::Param(ref sym) => sym.val_type.clone()
         }
@@ -105,6 +127,7 @@ impl Symbol {
     fn is_assignable(&self) -> bool {
         match self.node {
             SymbolType::Fun(_) => false,
+            SymbolType::MultiFun(_) => false,
             SymbolType::Var(ref sym) => sym.dims.borrow().len() == 0,
             SymbolType::Param(_) => true
         }
@@ -165,6 +188,65 @@ impl SymbolTable {
 
         self.symbol_names.insert(s.name.clone(), id);
         self.symbols.insert(id, s);
+
+        id
+    }
+
+    pub fn add_unnamed_symbol(&mut self, mut s: Symbol) -> usize {
+        s.id = self.alloc_symbol_id();
+        self.add_unnamed_symbol_with_id(s)
+    }
+
+    pub fn add_unnamed_symbol_with_id(&mut self, s: Symbol) -> usize {
+        let id = s.id;
+
+        self.symbols.insert(id, s);
+
+        id
+    }
+
+    pub fn add_function_symbol(&mut self, mut s: Symbol) -> usize {
+        s.id = self.alloc_symbol_id();
+        self.add_function_symbol_with_id(s)
+    }
+
+    pub fn add_function_symbol_with_id(&mut self, s: Symbol) -> usize {
+        let id = s.id;
+        let name = s.name.clone();
+        let sig = if let SymbolType::Fun(ref s) = s.node {
+            s.sig
+        } else {
+            unreachable!();
+        };
+
+        self.symbols.insert(id, s);
+
+        let old_sym = match self.find_imm_named_symbol(&name) {
+            Some(sym) => {
+                match sym.node {
+                    SymbolType::MultiFun(ref mf) => {
+                        mf.funcs.borrow_mut().push((sig, id));
+                        return id;
+                    },
+                    SymbolType::Fun(ref f) => Some((f.sig, sym.id)),
+                    _ => unreachable!()
+                }
+            },
+            None => None
+        };
+
+        if let Some((old_sig, old_id)) = old_sym {
+            self.add_symbol(Symbol {
+                id: 0,
+                name: name,
+                span: Span::dummy(),
+                node: SymbolType::MultiFun(MultiFunSymbol {
+                    funcs: RefCell::new(vec![(old_sig, old_id), (sig, id)])
+                })
+            });
+        } else {
+            self.symbol_names.insert(name, id);
+        };
 
         id
     }
@@ -462,7 +544,7 @@ impl <'a> fmt::Display for PrettyType<'a> {
             },
             Unresolved(ref possible_types) => {
                 if possible_types.len() == 1 {
-                    write!(f, "{}", possible_types[0].pretty(tdt))?;
+                    write!(f, "{} (ambiguous)", possible_types[0].pretty(tdt))?;
                 } else {
                     write!(f, "one of {}", possible_types[0].pretty(tdt))?;
 
@@ -725,18 +807,65 @@ fn create_symbol_for_decl(
             let return_type = resolve_type(tdt, symbols, errors, &sig.return_type);
             let fn_type = tdt.get_function_type(&params, &return_type);
 
-            // TODO Function overloading
             let define = if let Some(old_sym) = symbols.find_imm_named_symbol(&name) {
-                errors.push((
-                    format!(
-                        "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
-                        name,
-                        old_sym.span.lo.line,
-                        old_sym.span.lo.col
-                    ),
-                    decl.span
-                ));
-                false
+                fn does_sig_conflict(
+                    tdt: &TypeDefinitionTable,
+                    new_params: &[Type],
+                    old_sig: usize
+                ) -> bool {
+                    let old_params = if let TypeDefinition::Function(ref td) = tdt.defs[old_sig] {
+                        &td.params
+                    } else {
+                        unreachable!()
+                    };
+
+                    if new_params.len() == old_params.len() {
+                        new_params.iter().zip(old_params.iter())
+                            .all(|(t1, t2)| t1 == t2 && t1 != &Type::Error)
+                    } else {
+                        false
+                    }
+                }
+
+                let conflict_sym = match old_sym.node {
+                    SymbolType::Fun(ref f) => if does_sig_conflict(tdt, &params, f.sig) {
+                        Some(ChainRef::clone(&old_sym))
+                    } else {
+                        None
+                    },
+                    SymbolType::MultiFun(ref old_sym) => {
+                        old_sym.funcs.borrow().iter()
+                            .find(|&&(sig, _)| does_sig_conflict(tdt, &params, sig))
+                            .map(|&(_, sym_id)| symbols.find_symbol(sym_id).unwrap())
+                    },
+                    _ => Some(ChainRef::clone(&old_sym))
+                };
+
+                if let Some(conflict_sym) = conflict_sym {
+                    if let SymbolType::Fun(_) = conflict_sym.node {
+                        errors.push((
+                            format!(
+                                "this function conflicts with a previous definition (original definition is at line {}, col {})",
+                                conflict_sym.span.lo.line,
+                                conflict_sym.span.lo.col
+                            ),
+                            decl.span
+                        ));
+                    } else {
+                        errors.push((
+                            format!(
+                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
+                                name,
+                                conflict_sym.span.lo.line,
+                                conflict_sym.span.lo.col
+                            ),
+                            decl.span
+                        ));
+                    };
+                    false
+                } else {
+                    true
+                }
             } else {
                 true
             };
@@ -754,7 +883,7 @@ fn create_symbol_for_decl(
             };
 
             if define {
-                symbols.add_symbol(Symbol {
+                symbols.add_function_symbol(Symbol {
                     id: 0,
                     name: name.to_string(),
                     span: decl.span,
@@ -950,17 +1079,45 @@ fn do_analyze_expression(
             return Type::Int;
         },
         ast::ExprType::Id(ref name, ref mut sym_id) => {
-            return if let Some(sym) = symbols.find_named_symbol(name) {
+            fn resolve_symbol<'a>(
+                symbols: &'a SymbolTable,
+                name: &str,
+                expected_type: Option<&Type>
+            ) -> Option<ChainRef<'a, Symbol>> {
+                if let Some(sym) = symbols.find_named_symbol(name) {
+                    let next_sym_id = if let SymbolType::MultiFun(ref sym) = sym.node {
+                        if let Some(&Type::Defined(expected_type)) = expected_type {
+                            sym.funcs.borrow().iter()
+                                .find(|&&(type_id, _)| type_id == expected_type)
+                                .map(|&(_, sym_id)| sym_id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(next_sym_id) = next_sym_id {
+                        symbols.find_symbol(next_sym_id)
+                    } else {
+                        Some(sym)
+                    }
+                } else {
+                    None
+                }
+            }
+
+            if let Some(sym) = resolve_symbol(symbols, name, expected_type) {
                 expr.assignable = sym.is_assignable();
                 *sym_id = sym.id;
-                sym.val_type()
+                return sym.val_type();
             } else {
                 expr.assignable = true;
                 errors.push((
                     format!("no variable '{}' exists in this scope", name),
                     expr.span
                 ));
-                Type::Error
+                return Type::Error
             };
         },
         ast::ExprType::Call(ref mut func, ref mut params) => {
@@ -968,14 +1125,28 @@ fn do_analyze_expression(
                 t: &Type,
                 tdt: &'a TypeDefinitionTable
             ) -> Vec<(usize, &'a FunctionTypeDefinition)> {
-                if let Type::Defined(ref type_id) = *t {
-                    if let TypeDefinition::Function(ref typedef) = tdt.defs[*type_id] {
-                        vec![(*type_id, typedef)]
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
+                match *t {
+                    Type::Defined(type_id) => {
+                        if let TypeDefinition::Function(ref typedef) = tdt.defs[type_id] {
+                            vec![(type_id, typedef)]
+                        } else {
+                            vec![]
+                        }
+                    },
+                    Type::Unresolved(ref types) => {
+                        types.iter().filter_map(|t| {
+                            if let Type::Defined(type_id) = *t {
+                                if let TypeDefinition::Function(ref typedef) = tdt.defs[type_id] {
+                                    Some((type_id, typedef))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }).collect()
+                    },
+                    _ => vec![]
                 }
             }
 
@@ -999,8 +1170,43 @@ fn do_analyze_expression(
                 analyze_call_signature(&expr.span, &typedefs[0].1.params, params, tdt, symbols, errors);
                 return typedefs[0].1.return_type.clone();
             } else {
-                // TODO Allow function overloading
-                return Type::Error;
+                let param_types: Vec<_> = params.iter_mut()
+                    .map(|p| analyze_expression(p, tdt, symbols, None, errors))
+                    .collect();
+                let valid_typedefs = get_valid_call_signatures(
+                    &param_types[..],
+                    typedefs.iter().map(|&(_, td)| &td.params[..])
+                );
+
+                if valid_typedefs.len() == 0 {
+                    // TODO Better error message
+                    errors.push((
+                        "none of these functions matches the given arguments".to_string(),
+                        func.span
+                    ));
+                    return Type::Error;
+                } else if valid_typedefs.len() == 1 {
+                    analyze_expression(
+                        func,
+                        tdt,
+                        symbols,
+                        Some(&Type::Defined(typedefs[valid_typedefs[0]].0)),
+                        errors
+                    );
+                    analyze_call_signature(
+                        &expr.span,
+                        &typedefs[valid_typedefs[0]].1.params,
+                        params,
+                        tdt,
+                        symbols,
+                        errors
+                    );
+                    return typedefs[valid_typedefs[0]].1.return_type.clone();
+                } else {
+                    return Type::union(
+                        valid_typedefs.iter().map(|&i| typedefs[i].1.return_type.clone())
+                    );
+                };
             };
         },
         ast::ExprType::Index(ref mut val, ref mut index) => {
