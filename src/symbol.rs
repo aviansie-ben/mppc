@@ -35,7 +35,7 @@ impl PrettyDisplay for FunSymbol {
 #[derive(Debug, Clone)]
 pub struct VarSymbol {
     pub val_type: Type,
-    pub dims: Vec<ast::Expr>
+    pub dims: RefCell<Vec<ast::Expr>>
 }
 
 impl PrettyDisplay for VarSymbol {
@@ -45,7 +45,7 @@ impl PrettyDisplay for VarSymbol {
 
         write!(f, "{}Var {}", indent, self.val_type)?;
 
-        for dim in &self.dims {
+        for dim in self.dims.borrow().iter() {
             write!(f, "\n{}", dim.pretty_indented(&next_indent))?;
         };
 
@@ -783,7 +783,7 @@ fn create_symbol_for_decl(
                     span: spec.span,
                     node: SymbolType::Var(VarSymbol {
                         val_type: val_type,
-                        dims: spec.dims
+                        dims: RefCell::new(spec.dims)
                     })
                 });
             };
@@ -1281,7 +1281,7 @@ fn analyze_statement(
                             span: span,
                             node: SymbolType::Var(VarSymbol {
                                 val_type: Type::Error,
-                                dims: vec![]
+                                dims: RefCell::new(vec![])
                             })
                         }));
                     } else {
@@ -1354,7 +1354,7 @@ fn analyze_statement(
                             span: span,
                             node: SymbolType::Var(VarSymbol {
                                 val_type: val_type.clone(),
-                                dims: vec![]
+                                dims: RefCell::new(vec![])
                             })
                         }));
                     } else {
