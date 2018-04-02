@@ -1316,7 +1316,7 @@ fn analyze_statement(
                 symbols: &Rc<RefCell<SymbolTable>>,
                 errors: &mut Vec<(String, Span)>
             ) {
-                let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(id, ctor)| ctor.name == case.cid) {
+                let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
                     ctor
                 } else {
                     errors.push((
