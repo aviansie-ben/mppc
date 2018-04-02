@@ -101,6 +101,14 @@ impl Symbol {
             SymbolType::Param(ref sym) => sym.val_type.clone()
         }
     }
+
+    fn is_assignable(&self) -> bool {
+        match self.node {
+            SymbolType::Fun(_) => false,
+            SymbolType::Var(ref sym) => sym.dims.borrow().len() == 0,
+            SymbolType::Param(_) => true
+        }
+    }
 }
 
 impl PrettyDisplay for Symbol {
@@ -943,9 +951,11 @@ fn do_analyze_expression(
         },
         ast::ExprType::Id(ref name, ref mut sym_id) => {
             return if let Some(sym) = symbols.find_named_symbol(name) {
+                expr.assignable = sym.is_assignable();
                 *sym_id = sym.id;
                 sym.val_type()
             } else {
+                expr.assignable = true;
                 errors.push((
                     format!("no variable '{}' exists in this scope", name),
                     expr.span
@@ -1006,11 +1016,13 @@ fn do_analyze_expression(
 
             if let Type::Array(inner_type, dims) = val_type {
                 return if dims == 1 {
+                    expr.assignable = true;
                     *inner_type
                 } else {
                     Type::Array(inner_type, dims - 1)
                 };
             } else {
+                expr.assignable = true;
                 errors.push((
                     format!("cannot index into value of type {}", val_type.pretty(tdt)),
                     expr.span
@@ -1183,7 +1195,6 @@ fn analyze_statement(
             analyze_statement(do_stmt, tdt, symbols, expected_return, errors);
         },
         ast::StmtType::Read(ref mut loc) => {
-            // TODO Fix location analysis
             let val_type = analyze_expression(loc, tdt, &symbols.borrow(), None, errors);
             let is_valid = match val_type {
                 Type::Bool => true,
@@ -1194,7 +1205,12 @@ fn analyze_statement(
                 _ => false
             };
 
-            if !is_valid {
+            if !loc.assignable {
+                errors.push((
+                    "cannot assign a value to this expression".to_string(),
+                    loc.span
+                ));
+            } else if !is_valid {
                 errors.push((
                     format!("cannot read a value of type {}", val_type.pretty(tdt)),
                     stmt.span
@@ -1202,7 +1218,6 @@ fn analyze_statement(
             };
         },
         ast::StmtType::Assign(ref mut loc, ref mut val) => {
-            // TODO Fix location analysis
             let symbols = symbols.borrow();
             let expected_type = analyze_expression(loc, tdt, &symbols, None, errors);
             let actual_type = analyze_expression(val, tdt, &symbols, if expected_type.is_resolved() {
@@ -1211,7 +1226,12 @@ fn analyze_statement(
                 None
             }, errors);
 
-            if !actual_type.can_convert_to_exact(&expected_type) {
+            if !loc.assignable {
+                errors.push((
+                    "cannot assign a value to this expression".to_string(),
+                    loc.span
+                ));
+            } else if !actual_type.can_convert_to_exact(&expected_type) {
                 errors.push((
                     format!(
                         "cannot convert from {} to {}",
@@ -1446,17 +1466,36 @@ fn populate_block_symbol_table(
                 } else {
                     symbols.add_type(name.clone(), *type_id, decl.span);
                 };
-            }
-        }
+            };
+        };
 
         for decl in mem::replace(&mut block.decls, vec![]) {
             create_symbol_for_decl(tdt, symbols, errors, decl);
         };
-    }
+    };
 
-    for (_, sym) in &block.symbols.borrow().symbols {
-        if let SymbolType::Fun(ref fs) = sym.node {
-            populate_function_symbol_table(tdt, &block.symbols, &fs, errors);
+    {
+        let symbols = &block.symbols.borrow();
+
+        for (_, sym) in &symbols.symbols {
+            match sym.node {
+                SymbolType::Fun(ref fs) => {
+                    populate_function_symbol_table(tdt, &block.symbols, &fs, errors);
+                },
+                SymbolType::Var(ref vs) => {
+                    for d in vs.dims.borrow_mut().iter_mut() {
+                        let dim_type = analyze_expression(d, tdt, symbols, Some(&Type::Int), errors);
+
+                        if !dim_type.can_convert_to_exact(&Type::Int) {
+                            errors.push((
+                                format!("cannot convert from {} to int", dim_type.pretty(tdt)),
+                                d.span
+                            ));
+                        };
+                    };
+                },
+                _ => {}
+            };
         };
     };
 

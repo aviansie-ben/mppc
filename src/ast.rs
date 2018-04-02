@@ -395,12 +395,13 @@ pub enum ExprType {
 pub struct Expr {
     pub node: ExprType,
     pub span: Span,
-    pub val_type: symbol::Type
+    pub val_type: symbol::Type,
+    pub assignable: bool
 }
 
 impl Expr {
     pub fn new(node: ExprType) -> Expr {
-        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Unknown }
+        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Unknown, assignable: false }
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {
@@ -518,10 +519,14 @@ impl PrettyDisplay for Expr {
 
         let meta_display = DeferredDisplay(|f| {
             if self.val_type != symbol::Type::Unknown {
-                write!(f, " [TYPE: {}]", self.val_type)
-            } else {
-                Result::Ok(())
-            }
+                write!(f, " [TYPE: {}]", self.val_type)?;
+            };
+
+            if self.assignable {
+                write!(f, " [ASSIGNABLE]")?;
+            };
+
+            Result::Ok(())
         });
 
         match self.node {
