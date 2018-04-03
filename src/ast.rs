@@ -46,13 +46,24 @@ impl PrettyDisplay for Block {
         let mut next_indent = indent.to_string();
         next_indent.push_str(" ");
 
+        let mut next_next_indent = next_indent.to_string();
+        next_next_indent.push_str("  ");
+
         write!(f, "{}Block", indent)?;
 
         {
             let symbols = self.symbols.borrow();
 
             for (_, sym_id) in &symbols.symbol_names {
-                write!(f, "\n{}", symbols.find_symbol(*sym_id).unwrap().pretty_indented(&next_indent))?;
+                let sym = symbols.find_symbol(*sym_id).unwrap();
+                write!(f, "\n{}", sym.pretty_indented(&next_indent))?;
+
+                if let symbol::SymbolType::MultiFun(ref sym) = sym.node {
+                    for (_, sym_id) in sym.funcs.borrow().iter() {
+                        let sym = symbols.find_symbol(*sym_id).unwrap();
+                        write!(f, "\n{}", sym.pretty_indented(&next_next_indent))?;
+                    };
+                };
             };
         };
 
