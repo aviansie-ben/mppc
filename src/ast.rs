@@ -20,7 +20,16 @@ impl Program {
 
 impl PrettyDisplay for Program {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.block.pretty_indented(indent))
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        for (id, td) in self.types.defs.iter().enumerate() {
+            write!(f, "{}TypeDef {}\n{}\n", indent, id, td.pretty_indented(&next_indent))?;
+        };
+
+        write!(f, "{}", self.block.pretty_indented(indent))?;
+
+        Result::Ok(())
     }
 }
 
@@ -53,6 +62,10 @@ impl PrettyDisplay for Block {
 
         {
             let symbols = self.symbols.borrow();
+
+            for (name, &(id, _)) in &symbols.type_names {
+                write!(f, "\n{}TypeRef {} {}", next_indent, name, id)?;
+            };
 
             for (_, sym_id) in &symbols.symbol_names {
                 let sym = symbols.find_symbol(*sym_id).unwrap();

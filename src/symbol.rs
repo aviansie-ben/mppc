@@ -351,11 +351,44 @@ pub struct DataTypeCtor {
     pub span: Span
 }
 
+impl PrettyDisplay for DataTypeCtor {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}Ctor #{}", indent, self.name)?;
+
+        if self.args.len() != 0 {
+            write!(f, "({}", self.args[0])?;
+
+            for a in &self.args[1..] {
+                write!(f, ", {}", a)?;
+            };
+
+            write!(f, ")")?;
+        };
+
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DataTypeDefinition {
     pub name: String,
     pub ctors: Vec<DataTypeCtor>,
     pub span: Span
+}
+
+impl PrettyDisplay for DataTypeDefinition {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut next_indent = indent.to_string();
+        next_indent.push_str(" ");
+
+        write!(f, "{}DataType {}", indent, self.name)?;
+
+        for ctor in &self.ctors {
+            write!(f, "\n{}", ctor.pretty_indented(&next_indent))?;
+        };
+
+        Result::Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -364,11 +397,37 @@ pub struct FunctionTypeDefinition {
     pub return_type: Type
 }
 
+impl PrettyDisplay for FunctionTypeDefinition {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}FunctionType\n{} Params", indent, indent)?;
+
+        for p in &self.params {
+            write!(f, " {}", p)?;
+        };
+
+        write!(f, "\n{} Returns {}", indent, self.return_type)?;
+
+        Result::Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TypeDefinition {
     Data(DataTypeDefinition),
     Function(FunctionTypeDefinition),
     Dummy
+}
+
+impl PrettyDisplay for TypeDefinition {
+    fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        use symbol::TypeDefinition::*;
+
+        match *self {
+            Data(ref td) => write!(f, "{}", td.pretty_indented(indent)),
+            Function(ref td) => write!(f, "{}", td.pretty_indented(indent)),
+            Dummy => write!(f, "{}DummyType", indent)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
