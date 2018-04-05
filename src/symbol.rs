@@ -717,6 +717,221 @@ impl TypeDefinitionTable {
     }
 }
 
+macro_rules! name_already_defined {
+    ($name:expr, $span:expr, $old_sym:expr) => ((
+            format!(
+                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
+                $name,
+                $old_sym.span.lo.line,
+                $old_sym.span.lo.col
+            ),
+            $span
+    ))
+}
+
+macro_rules! expect_name_not_defined {
+    ($symbols:expr, $errors:expr, $name:expr, $span:expr) => {{
+        if let Some(old_sym) = $symbols.find_imm_named_symbol($name) {
+            $errors.push(name_already_defined!($name, $span, old_sym));
+            false
+        } else {
+            true
+        }
+    }}
+}
+
+macro_rules! variable_not_defined {
+    ($name:expr, $span:expr) => ((
+        format!("no variable '{}' exists in this scope", $name),
+        $span
+    ))
+}
+
+macro_rules! constructor_already_defined {
+    ($name:expr, $span:expr, $old_span:expr) => ((
+        format!(
+            "constructor #{} redefined (original definition is at line {}, col {})",
+            $name,
+            $old_span.lo.line,
+            $old_span.lo.col
+        ),
+        $span
+    ))
+}
+
+macro_rules! constructor_not_defined {
+    ($name:expr, $span:expr) => ((
+        format!("no constructor #{} has been defined", $name),
+        $span
+    ));
+
+    ($name:expr, $span:expr, $type_name:expr) => ((
+        format!("type {} does not have a constructor #{}", $type_name, $name),
+        $span
+    ))
+}
+
+macro_rules! function_definition_conflict {
+    ($decl:expr, $old_sym:expr) => ((
+        format!(
+            "this function conflicts with a previous definition (original definition is at line {}, col {})",
+            $old_sym.span.lo.line,
+            $old_sym.span.lo.col
+        ),
+        $decl.span
+    ))
+}
+
+macro_rules! type_already_defined {
+    ($name:expr, $span:expr, $old_span:expr) => ((
+        format!(
+            "a type '{}' already exists in this scope (original definition is at line {}, col {})",
+            $name,
+            $old_span.lo.line,
+            $old_span.lo.col
+        ),
+        $span
+    ))
+}
+
+macro_rules! type_not_defined {
+    ($name:expr, $span:expr) => ((
+        format!("no type {} has been defined", $name),
+        $span
+    ))
+}
+
+macro_rules! wrong_number_of_args {
+    ($actual_number:expr, $expected_number:expr, $span:expr) => ((
+        format!(
+            "wrong number of arguments: expected {}, but found {}",
+            $expected_number,
+            $actual_number
+        ),
+        $span
+    ))
+}
+
+macro_rules! cannot_convert {
+    ($tdt:expr, $expr:expr, $expected_type:expr) => ((
+        format!(
+            "cannot convert from {} to {}",
+            $expr.val_type.pretty($tdt),
+            $expected_type.pretty($tdt)
+        ),
+        $expr.span
+    ))
+}
+
+macro_rules! expect_convert_exact {
+    ($tdt:expr, $errors:expr, $expr:expr, $expected_type:expr) => {{
+        if !$expr.val_type.can_convert_to_exact($expected_type) {
+            $errors.push(cannot_convert!($tdt, $expr, $expected_type));
+            false
+        } else {
+            true
+        }
+    }}
+}
+
+macro_rules! cannot_return_outside_func {
+    ($span:expr) => ((
+        "cannot return outside function".to_string(),
+        $span
+    ))
+}
+
+macro_rules! cannot_pattern_match {
+    ($tdt:expr, $expr:expr) => ((
+        format!("cannot pattern match on a value of type {}", $expr.val_type.pretty($tdt)),
+        $expr.span
+    ))
+}
+
+macro_rules! cannot_read {
+    ($tdt:expr, $expr:expr) => ((
+        format!("cannot read a value of type {}", $expr.val_type.pretty($tdt)),
+        $expr.span
+    ))
+}
+
+macro_rules! cannot_print {
+    ($tdt:expr, $expr:expr) => ((
+        format!("cannot print a value of type {}", $expr.val_type.pretty($tdt)),
+        $expr.span
+    ))
+}
+
+macro_rules! no_such_operator {
+    ($tdt:expr, $op:expr, $val:expr, $span:expr) => ((
+        format!("no operator {} exists for {}", $op, $val.val_type.pretty($tdt)),
+        $span
+    ));
+
+    ($tdt:expr, $op:expr, $val1:expr, $val2:expr, $span:expr) => ((
+        format!(
+            "no operator {} exists for {} and {}",
+            $op,
+            $val1.val_type.pretty($tdt),
+            $val2.val_type.pretty($tdt)
+        ),
+        $span
+    ))
+}
+
+macro_rules! cannot_get_size {
+    ($tdt:expr, $val:expr, $span:expr) => ((
+        format!("cannot use size operator on value of type {}", $val.val_type.pretty($tdt)),
+        $span
+    ));
+
+    ($tdt:expr, $val:expr, $dim:expr, $span:expr) => ((
+        format!(
+            "cannot get the size of dimension {} of a value of type {}",
+            $dim,
+            $val.val_type.pretty($tdt)
+        ),
+        $span
+    ))
+}
+
+macro_rules! cannot_call {
+    ($tdt:expr, $func:expr, $span:expr) => ((
+        format!("cannot call expression of type {}", $func.val_type.pretty($tdt)),
+        $span
+    ))
+}
+
+macro_rules! cannot_index {
+    ($tdt:expr, $val:expr, $span:expr) => ((
+        format!("cannot index into value of type {}", $val.val_type.pretty($tdt)),
+        $span
+    ))
+}
+
+macro_rules! cannot_assign {
+    ($val:expr) => ((
+        "this expression cannot be assigned to".to_string(),
+        $val.span
+    ))
+}
+
+// TODO Better error message
+macro_rules! no_function_match {
+    ($tdt:expr, $params:expr, $defs:expr, $span:expr) => ((
+        "none of these functions matches the given arguments".to_string(),
+        $span
+    ))
+}
+
+// TODO Better error message
+macro_rules! no_constructor_match {
+    ($tdt:expr, $name:expr, $params:expr, $defs:expr, $span:expr) => ((
+        format!("no constructor #{} in this scope matches the given arguments", $name),
+        $span
+    ))
+}
+
 fn resolve_type(
     tdt: &mut TypeDefinitionTable,
     symbols: &SymbolTable,
@@ -732,10 +947,7 @@ fn resolve_type(
             if let Some((type_id, _)) = symbols.find_named_type(name) {
                 Type::Defined(type_id)
             } else {
-                errors.push((
-                    format!("no type {} has been defined", name),
-                    *span
-                ));
+                errors.push(type_not_defined!(name, *span));
                 Type::Error
             }
         },
@@ -775,15 +987,7 @@ fn create_symbol_for_decl(
             for (i, c1) in type_def.ctors[1..].iter().enumerate() {
                 for c2 in &type_def.ctors[..(i + 1)] {
                     if c1.name == c2.name {
-                        errors.push((
-                            format!(
-                                "constructor #{} redefined (original definition is at line {}, col {})",
-                                c1.name,
-                                c2.span.lo.line,
-                                c2.span.lo.col
-                            ),
-                            c1.span
-                        ));
+                        errors.push(constructor_already_defined!(c1.name, c1.span, c2.span));
                         bad_ctors.push(i + 1);
                         break;
                     };
@@ -843,24 +1047,9 @@ fn create_symbol_for_decl(
 
                 if let Some(conflict_sym) = conflict_sym {
                     if let SymbolType::Fun(_) = conflict_sym.node {
-                        errors.push((
-                            format!(
-                                "this function conflicts with a previous definition (original definition is at line {}, col {})",
-                                conflict_sym.span.lo.line,
-                                conflict_sym.span.lo.col
-                            ),
-                            decl.span
-                        ));
+                        errors.push(function_definition_conflict!(decl, conflict_sym));
                     } else {
-                        errors.push((
-                            format!(
-                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
-                                name,
-                                conflict_sym.span.lo.line,
-                                conflict_sym.span.lo.col
-                            ),
-                            decl.span
-                        ));
+                        errors.push(name_already_defined!(name, decl.span, conflict_sym));
                     };
                     false
                 } else {
@@ -898,22 +1087,7 @@ fn create_symbol_for_decl(
         ast::DeclType::Var(spec, val_type) => {
             let val_type = resolve_type(tdt, symbols, errors, &val_type);
 
-            let define = if let Some(old_sym) = symbols.find_imm_named_symbol(&spec.id) {
-                errors.push((
-                    format!(
-                        "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
-                        spec.id,
-                        old_sym.span.lo.line,
-                        old_sym.span.lo.col
-                    ),
-                    spec.span
-                ));
-                false
-            } else {
-                true
-            };
-
-            if define {
+            if expect_name_not_defined!(symbols, errors, &spec.id, spec.span) {
                 symbols.add_symbol(Symbol {
                     id: 0,
                     name: spec.id,
@@ -952,25 +1126,12 @@ fn analyze_call_signature(
     errors: &mut Vec<(String, Span)>
 ) {
     if params.len() != expected_types.len() {
-        errors.push((
-            format!(
-                "wrong number of arguments: expected {}, but found {}",
-                expected_types.len(),
-                params.len()
-            ),
-            *span
-        ));
+        errors.push(wrong_number_of_args!(params.len(), expected_types.len(), *span));
     };
 
     for (et, param) in expected_types.iter().zip(params.iter_mut()) {
-        let at = &analyze_expression(param, tdt, symbols, Some(et), errors);
-
-        if !at.can_convert_to_exact(et) {
-            errors.push((
-                format!("cannot convert from {} to {}", at.pretty(tdt), et.pretty(tdt)),
-                param.span
-            ));
-        };
+        analyze_expression(param, tdt, symbols, Some(et), errors);
+        expect_convert_exact!(tdt, errors, param, et);
     };
 }
 
@@ -1016,10 +1177,7 @@ fn do_analyze_expression(
 
                 return result.clone();
             } else {
-                errors.push((
-                    format!("no operator {} exists for {} and {}", op, val_types[0].pretty(tdt), val_types[0].pretty(tdt)),
-                    expr.span
-                ));
+                errors.push(no_such_operator!(tdt, op, lhs, rhs, expr.span));
                 return Type::Error;
             };
         },
@@ -1053,10 +1211,7 @@ fn do_analyze_expression(
 
                 return result.clone();
             } else {
-                errors.push((
-                    format!("no operator {} exists for {}", op, val_types[0].pretty(tdt)),
-                    expr.span
-                ));
+                errors.push(no_such_operator!(tdt, op, val, expr.span));
                 return Type::Error;
             };
         },
@@ -1065,16 +1220,10 @@ fn do_analyze_expression(
 
             if let Type::Array(_, val_dims) = val_type {
                 if dim >= val_dims {
-                    errors.push((
-                        format!("cannot get the size of dimension {} of a value of type {}", dim, val_type.pretty(tdt)),
-                        expr.span
-                    ));
+                    errors.push(cannot_get_size!(tdt, val, dim, expr.span));
                 };
             } else {
-                errors.push((
-                    format!("cannot use size operator on value of type {}", val_type.pretty(tdt)),
-                    expr.span
-                ));
+                errors.push(cannot_get_size!(tdt, val, expr.span));
             };
             return Type::Int;
         },
@@ -1113,10 +1262,7 @@ fn do_analyze_expression(
                 return sym.val_type();
             } else {
                 expr.assignable = true;
-                errors.push((
-                    format!("no variable '{}' exists in this scope", name),
-                    expr.span
-                ));
+                errors.push(variable_not_defined!(name, expr.span));
                 return Type::Error
             };
         },
@@ -1161,10 +1307,7 @@ fn do_analyze_expression(
             let typedefs = get_function_typedefs(&func_type, tdt);
 
             if typedefs.len() == 0 {
-                errors.push((
-                    format!("cannot call expression of type {}", func_type.pretty(tdt)),
-                    expr.span
-                ));
+                errors.push(cannot_call!(tdt, func, expr.span));
                 return Type::Error;
             } else if typedefs.len() == 1 {
                 analyze_call_signature(&expr.span, &typedefs[0].1.params, params, tdt, symbols, errors);
@@ -1179,11 +1322,7 @@ fn do_analyze_expression(
                 );
 
                 if valid_typedefs.len() == 0 {
-                    // TODO Better error message
-                    errors.push((
-                        "none of these functions matches the given arguments".to_string(),
-                        func.span
-                    ));
+                    errors.push(no_function_match!(tdt, params, typedefs, expr.span));
                     return Type::Error;
                 } else if valid_typedefs.len() == 1 {
                     analyze_expression(
@@ -1211,14 +1350,9 @@ fn do_analyze_expression(
         },
         ast::ExprType::Index(ref mut val, ref mut index) => {
             let val_type = analyze_expression(val, tdt, symbols, None, errors);
-            let index_type = analyze_expression(index, tdt, symbols, Some(&Type::Int), errors);
 
-            if !index_type.can_convert_to_exact(&Type::Int) {
-                errors.push((
-                    format!("cannot convert from {} to int", index_type.pretty(tdt)),
-                    index.span
-                ));
-            };
+            analyze_expression(index, tdt, symbols, Some(&Type::Int), errors);
+            expect_convert_exact!(tdt, errors, index, &Type::Int);
 
             if let Type::Array(inner_type, dims) = val_type {
                 return if dims == 1 {
@@ -1229,10 +1363,7 @@ fn do_analyze_expression(
                 };
             } else {
                 expr.assignable = true;
-                errors.push((
-                    format!("cannot index into value of type {}", val_type.pretty(tdt)),
-                    expr.span
-                ));
+                errors.push(cannot_index!(tdt, val, expr.span));
                 return Type::Error;
             };
         },
@@ -1246,10 +1377,7 @@ fn do_analyze_expression(
             let ctors = if let Some(ctors) = symbols.find_ctors(name) {
                 ctors
             } else {
-                errors.push((
-                    format!("no constructor #{} has been declared in this scope", name),
-                    expr.span
-                ));
+                errors.push(constructor_not_defined!(name, expr.span));
                 return Type::Error;
             };
 
@@ -1279,7 +1407,7 @@ fn do_analyze_expression(
                     };
                 };
 
-                let ctors: Vec<_> = ctors.iter().map(|ctor_id| {
+                let valid_ctors: Vec<_> = ctors.iter().map(|ctor_id| {
                     let ctor = match tdt.defs[ctor_id.0] {
                         TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                         _ => panic!("invalid data type")
@@ -1288,14 +1416,13 @@ fn do_analyze_expression(
                     (ctor, *ctor_id)
                 }).filter(|(ctor, _)| ctor.args.len() == params.len()).collect();
 
-                if ctors.len() == 0 {
-                    errors.push((
-                        format!("no constructor #{} in this scope takes {} arguments", name, params.len()),
-                        expr.span
-                    ));
+                if valid_ctors.len() == 0 {
+                    let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
+
+                    errors.push(no_constructor_match!(tdt, name, param_types, ctors, expr.span));
                     return Type::Error;
-                } else if ctors.len() == 1 {
-                    let (ctor, ctor_id) = ctors[0];
+                } else if valid_ctors.len() == 1 {
+                    let (ctor, ctor_id) = valid_ctors[0];
 
                     analyze_call_signature(&expr.span, &ctor.args, params, tdt, symbols, errors);
                     *expr_ctor_id = ctor_id.1;
@@ -1303,7 +1430,7 @@ fn do_analyze_expression(
                 }
 
                 let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
-                let valid_ctors: Vec<_> = ctors.iter().filter(|&&(ctor, _)| {
+                let valid_ctors: Vec<_> = valid_ctors.iter().filter(|&&(ctor, _)| {
                     for (et, at) in ctor.args.iter().zip(param_types.iter()) {
                         if !at.can_convert_to(et) {
                             return false;
@@ -1313,11 +1440,7 @@ fn do_analyze_expression(
                 }).collect();
 
                 if valid_ctors.len() == 0 {
-                    // TODO Better error message
-                    errors.push((
-                        format!("no constructor #{} in this scope matches the given arguments", name),
-                        expr.span
-                    ));
+                    errors.push(no_constructor_match!(tdt, name, param_types, ctors, expr.span));
                     return Type::Error;
                 } else if valid_ctors.len() == 1 {
                     let (ctor, ctor_id) = valid_ctors[0];
@@ -1378,25 +1501,15 @@ fn analyze_statement(
 ) {
     match stmt.node {
         ast::StmtType::IfThenElse(ref mut cond, ref mut then_stmt, ref mut else_stmt) => {
-            let cond_type = analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
-            if !cond_type.can_convert_to_exact(&Type::Bool) {
-                errors.push((
-                    format!("cannot convert from {} to bool", cond_type.pretty(tdt)),
-                    cond.span
-                ));
-            };
+            analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            expect_convert_exact!(tdt, errors, cond, &Type::Bool);
 
             analyze_statement(then_stmt, tdt, symbols, expected_return, errors);
             analyze_statement(else_stmt, tdt, symbols, expected_return, errors);
         },
         ast::StmtType::WhileDo(ref mut cond, ref mut do_stmt) => {
-            let cond_type = analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
-            if !cond_type.can_convert_to_exact(&Type::Bool) {
-                errors.push((
-                    format!("cannot convert from {} to bool", cond_type.pretty(tdt)),
-                    cond.span
-                ));
-            };
+            analyze_expression(cond, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            expect_convert_exact!(tdt, errors, cond, &Type::Bool);
 
             analyze_statement(do_stmt, tdt, symbols, expected_return, errors);
         },
@@ -1412,40 +1525,24 @@ fn analyze_statement(
             };
 
             if !loc.assignable {
-                errors.push((
-                    "cannot assign a value to this expression".to_string(),
-                    loc.span
-                ));
+                errors.push(cannot_assign!(loc));
             } else if !is_valid {
-                errors.push((
-                    format!("cannot read a value of type {}", val_type.pretty(tdt)),
-                    stmt.span
-                ));
+                errors.push(cannot_read!(tdt, loc));
             };
         },
         ast::StmtType::Assign(ref mut loc, ref mut val) => {
             let symbols = symbols.borrow();
             let expected_type = analyze_expression(loc, tdt, &symbols, None, errors);
-            let actual_type = analyze_expression(val, tdt, &symbols, if expected_type.is_resolved() {
+            analyze_expression(val, tdt, &symbols, if expected_type.is_resolved() {
                 Some(&expected_type)
             } else {
                 None
             }, errors);
 
             if !loc.assignable {
-                errors.push((
-                    "cannot assign a value to this expression".to_string(),
-                    loc.span
-                ));
-            } else if !actual_type.can_convert_to_exact(&expected_type) {
-                errors.push((
-                    format!(
-                        "cannot convert from {} to {}",
-                        actual_type.pretty(tdt),
-                        expected_type.pretty(tdt)
-                    ),
-                    val.span
-                ));
+                errors.push(cannot_assign!(loc));
+            } else {
+                expect_convert_exact!(tdt, errors, val, &expected_type);
             };
         },
         ast::StmtType::Print(ref mut val) => {
@@ -1460,10 +1557,7 @@ fn analyze_statement(
             };
 
             if !is_valid {
-                errors.push((
-                    format!("cannot print a value of type {}", val_type.pretty(tdt)),
-                    stmt.span
-                ));
+                errors.push(cannot_print!(tdt, val));
             };
         },
         ast::StmtType::Block(ref mut inner_block) => {
@@ -1485,22 +1579,7 @@ fn analyze_statement(
                 sub_symbols.set_parent(symbols.clone());
 
                 for (name, span) in case.vars.drain(..) {
-                    let define = if let Some(old_sym) = sub_symbols.find_imm_named_symbol(&name) {
-                        errors.push((
-                            format!(
-                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
-                                name,
-                                old_sym.span.lo.line,
-                                old_sym.span.lo.col
-                            ),
-                            span
-                        ));
-                        false
-                    } else {
-                        true
-                    };
-
-                    if define {
+                    if expect_name_not_defined!(sub_symbols, errors, &name, span) {
                         case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                             id: 0,
                             name: name,
@@ -1525,14 +1604,7 @@ fn analyze_statement(
                 let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
                     ctor
                 } else {
-                    errors.push((
-                        format!(
-                            "no constructor #{} exists for type {}",
-                            case.cid,
-                            typedef.name
-                        ),
-                        case.span
-                    ));
+                    errors.push(constructor_not_defined!(case.cid, case.span, typedef.name));
 
                     analyze_case_error(case, symbols, errors);
                     return;
@@ -1541,14 +1613,7 @@ fn analyze_statement(
                 case.ctor_id = ctor_id;
 
                 if ctor.args.len() != case.vars.len() {
-                    errors.push((
-                        format!(
-                            "wrong number of arguments to destructure: expected {}, but found {}",
-                            ctor.args.len(),
-                            case.vars.len()
-                        ),
-                        case.span
-                    ));
+                    errors.push(wrong_number_of_args!(case.vars.len(), ctor.args.len(), case.span));
 
                     analyze_case_error(case, symbols, errors);
                     return;
@@ -1558,22 +1623,7 @@ fn analyze_statement(
                 sub_symbols.set_parent(symbols.clone());
 
                 for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
-                    let define = if let Some(old_sym) = sub_symbols.find_imm_named_symbol(&name) {
-                        errors.push((
-                            format!(
-                                "the name '{}' has already been defined in this scope (original definition is at line {}, col {})",
-                                name,
-                                old_sym.span.lo.line,
-                                old_sym.span.lo.col
-                            ),
-                            span
-                        ));
-                        false
-                    } else {
-                        true
-                    };
-
-                    if define {
+                    if expect_name_not_defined!(sub_symbols, errors, &name, span) {
                         case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                             id: 0,
                             name: name,
@@ -1606,10 +1656,7 @@ fn analyze_statement(
                         analyze_case(case, typedef, symbols, errors);
                     };
                 } else {
-                    errors.push((
-                        format!("cannot pattern match on a value of type {}", val_type.pretty(tdt)),
-                        val.span
-                    ));
+                    errors.push(cannot_pattern_match!(tdt, val));
 
                     for case in cases.iter_mut() {
                         analyze_case_error(case, symbols, errors);
@@ -1622,20 +1669,12 @@ fn analyze_statement(
             };
         },
         ast::StmtType::Return(ref mut val) => {
-            let val_type = analyze_expression(val, tdt, &symbols.borrow(), expected_return, errors);
+            analyze_expression(val, tdt, &symbols.borrow(), expected_return, errors);
 
             if let Some(expected_return) = expected_return {
-                if !val_type.can_convert_to_exact(expected_return) {
-                    errors.push((
-                        format!("cannot convert from {} to {}", val_type.pretty(tdt), expected_return.pretty(tdt)),
-                        val.span
-                    ));
-                };
+                expect_convert_exact!(tdt, errors, val, expected_return);
             } else {
-                errors.push((
-                    "cannot return from outside a function".to_string(),
-                    stmt.span
-                ));
+                errors.push(cannot_return_outside_func!(stmt.span));
             };
         }
     };
@@ -1660,15 +1699,7 @@ fn populate_block_symbol_table(
             if let ast::DeclType::Data(ref name, ref mut type_id, _) = decl.node {
                 *type_id = tdt.add_definition(TypeDefinition::Dummy);
                 if let Some((_, old_type_span)) = symbols.find_imm_named_type(&name) {
-                    errors.push((
-                        format!(
-                            "a type '{}' already exists in this scope (original definition is at line {}, col {})",
-                            name,
-                            old_type_span.lo.line,
-                            old_type_span.lo.col
-                        ),
-                        decl.span
-                    ));
+                    errors.push(type_already_defined!(name, decl.span, old_type_span));
                 } else {
                     symbols.add_type(name.clone(), *type_id, decl.span);
                 };
@@ -1690,14 +1721,8 @@ fn populate_block_symbol_table(
                 },
                 SymbolType::Var(ref vs) => {
                     for d in vs.dims.borrow_mut().iter_mut() {
-                        let dim_type = analyze_expression(d, tdt, symbols, Some(&Type::Int), errors);
-
-                        if !dim_type.can_convert_to_exact(&Type::Int) {
-                            errors.push((
-                                format!("cannot convert from {} to int", dim_type.pretty(tdt)),
-                                d.span
-                            ));
-                        };
+                        analyze_expression(d, tdt, symbols, Some(&Type::Int), errors);
+                        expect_convert_exact!(tdt, errors, d, &Type::Int);
                     };
                 },
                 _ => {}
