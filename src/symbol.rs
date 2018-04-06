@@ -762,6 +762,7 @@ lazy_static! {
         let mut fs = HashSet::new();
 
         fs.insert("return_anywhere");
+        fs.insert("optional_else");
 
         fs
     };
@@ -1048,6 +1049,13 @@ macro_rules! duplicate_case {
             $old_span.lo.line,
             $old_span.lo.col
         ),
+        $span
+    ))
+}
+
+macro_rules! missing_else {
+    ($span:expr) => ((
+        format!("this if statement is missing an else branch (did you mean to add `@feature(optional_else)'?)"),
         $span
     ))
 }
@@ -1631,7 +1639,12 @@ fn analyze_statement(
             expect_convert_exact!(tdt, errors, cond, &Type::Bool);
 
             analyze_statement(then_stmt, features, tdt, symbols, expected_return, errors);
-            analyze_statement(else_stmt, features, tdt, symbols, expected_return, errors);
+
+            if let Some(else_stmt) = else_stmt {
+                analyze_statement(else_stmt, features, tdt, symbols, expected_return, errors);
+            } else if !features.contains_key("optional_else") {
+                errors.push(missing_else!(stmt.span));
+            };
         },
         ast::StmtType::WhileDo(ref mut cond, ref mut do_stmt) => {
             analyze_expression(cond, features, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
@@ -1914,7 +1927,10 @@ fn populate_function_symbol_table(
                 match s.node {
                     IfThenElse(_, ref then_stmt, ref else_stmt) => {
                         check_no_return(then_stmt, errors);
-                        check_no_return(else_stmt, errors);
+
+                        if let Some(else_stmt) = else_stmt {
+                            check_no_return(else_stmt, errors);
+                        };
                     },
                     WhileDo(_, ref do_stmt) => {
                         check_no_return(do_stmt, errors);

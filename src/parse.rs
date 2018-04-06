@@ -124,6 +124,8 @@ parser! {
         If expr[cond] Then stmt[then_stmt] Else stmt[else_stmt] => Stmt::if_then_else(
             cond, then_stmt, else_stmt
         ).at(span!()),
+        #[no_reduce(Else)]
+        If expr[cond] Then stmt[then_stmt] => Stmt::if_then(cond, then_stmt).at(span!()),
         While expr[cond] Do stmt[do_stmt] => Stmt::while_do(cond, do_stmt).at(span!()),
         Read loc[l] => Stmt::read(l).at(span!()),
         loc[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),

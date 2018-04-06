@@ -719,7 +719,7 @@ impl PrettyDisplay for Case {
 
 #[derive(Debug, Clone)]
 pub enum StmtType {
-    IfThenElse(Expr, Box<Stmt>, Box<Stmt>),
+    IfThenElse(Expr, Box<Stmt>, Option<Box<Stmt>>),
     WhileDo(Expr, Box<Stmt>),
     Read(Expr),
     Assign(Expr, Expr),
@@ -741,7 +741,11 @@ impl Stmt {
     }
 
     pub fn if_then_else(cond: Expr, true_stmt: Stmt, false_stmt: Stmt) -> Stmt {
-        Stmt::new(StmtType::IfThenElse(cond, Box::new(true_stmt), Box::new(false_stmt)))
+        Stmt::new(StmtType::IfThenElse(cond, Box::new(true_stmt), Some(Box::new(false_stmt))))
+    }
+
+    pub fn if_then(cond: Expr, true_stmt: Stmt) -> Stmt {
+        Stmt::new(StmtType::IfThenElse(cond, Box::new(true_stmt), None))
     }
 
     pub fn while_do(cond: Expr, do_stmt: Stmt) -> Stmt {
@@ -781,7 +785,11 @@ impl Stmt {
         use ast::StmtType::*;
 
         match self.node {
-            IfThenElse(_, ref then_stmt, ref else_stmt) => then_stmt.will_return(tdt) && else_stmt.will_return(tdt),
+            IfThenElse(_, ref then_stmt, ref else_stmt) => if let Some(else_stmt) = else_stmt {
+                then_stmt.will_return(tdt) && else_stmt.will_return(tdt)
+            } else {
+                false
+            },
             WhileDo(Expr { node: ExprType::Bool(true), .. }, _) => true,
             Block(ref block) => block.stmts.iter().any(|s| s.will_return(tdt)),
             Case(ref val, ref cases) => val.val_type.are_cases_exhaustive(tdt, cases) && cases.iter().all(|c| c.stmt.will_return(tdt)),
@@ -800,14 +808,24 @@ impl PrettyDisplay for Stmt {
 
         match self.node {
             IfThenElse(ref cond, ref true_stmt, ref false_stmt) => {
-                write!(
-                    f,
-                    "{}IfThenElse\n{}\n{}\n{}",
-                    indent,
-                    cond.pretty_indented(&next_indent),
-                    true_stmt.pretty_indented(&next_indent),
-                    false_stmt.pretty_indented(&next_indent)
-                )?;
+                if let Some(false_stmt) = false_stmt {
+                    write!(
+                        f,
+                        "{}IfThenElse\n{}\n{}\n{}",
+                        indent,
+                        cond.pretty_indented(&next_indent),
+                        true_stmt.pretty_indented(&next_indent),
+                        false_stmt.pretty_indented(&next_indent)
+                    )?;
+                } else {
+                    write!(
+                        f,
+                        "{}IfThen\n{}\n{}",
+                        indent,
+                        cond.pretty_indented(&next_indent),
+                        true_stmt.pretty_indented(&next_indent)
+                    )?;
+                };
             },
             WhileDo(ref cond, ref do_stmt) => {
                 write!(
