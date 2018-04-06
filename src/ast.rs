@@ -782,6 +782,7 @@ impl Stmt {
 
         match self.node {
             IfThenElse(_, ref then_stmt, ref else_stmt) => then_stmt.will_return() && else_stmt.will_return(),
+            WhileDo(Expr { node: ExprType::Bool(true), .. }, _) => true,
             Block(ref block) => block.stmts.iter().any(|s| s.will_return()),
             Case(_, ref cases) => cases.iter().all(|c| c.stmt.will_return()),
             Return(_) => true,
