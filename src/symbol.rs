@@ -1020,6 +1020,18 @@ macro_rules! missing_return_anywhere {
     ))
 }
 
+macro_rules! duplicate_case {
+    ($name:expr, $span:expr, $old_span:expr) => ((
+        format!(
+            "constructor #{} is already covered by a previous branch (at line {}, col {})",
+            $name,
+            $old_span.lo.line,
+            $old_span.lo.col
+        ),
+        $span
+    ))
+}
+
 fn resolve_type(
     tdt: &mut TypeDefinitionTable,
     symbols: &SymbolTable,
@@ -1746,8 +1758,15 @@ fn analyze_statement(
                 };
 
                 if let Some(typedef) = typedef {
+                    let mut handled_cases: Vec<(usize, Span)> = Vec::new();
                     for case in cases.iter_mut() {
                         analyze_case(case, typedef, symbols, errors);
+
+                        if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
+                            errors.push(duplicate_case!(case.cid, case.span, prev_span));
+                        } else {
+                            handled_cases.push((case.ctor_id, case.span));
+                        };
                     };
                 } else {
                     errors.push(cannot_pattern_match!(tdt, val));
