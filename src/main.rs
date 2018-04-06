@@ -1,3 +1,4 @@
+#![feature(box_patterns)]
 #![feature(match_default_bindings)]
 #![feature(plugin)]
 #![feature(vec_remove_item)]

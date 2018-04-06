@@ -7,7 +7,7 @@ use lex::Span;
 use symbol;
 use util::{DeferredDisplay, PrettyDisplay};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Program {
     pub block: Block,
     pub features: HashMap<String, Span>,
@@ -29,7 +29,7 @@ impl PrettyDisplay for Program {
             write!(f, "{}Feature {}\n", indent, feature)?;
         }
 
-        for (id, td) in self.types.defs.iter().enumerate() {
+        for (id, td) in &self.types {
             write!(f, "{}TypeDef {}\n{}\n", indent, id, td.pretty_indented(&next_indent))?;
         };
 

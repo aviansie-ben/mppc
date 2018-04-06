@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::mem;
@@ -414,8 +414,7 @@ impl PrettyDisplay for FunctionTypeDefinition {
 #[derive(Debug, Clone)]
 pub enum TypeDefinition {
     Data(DataTypeDefinition),
-    Function(FunctionTypeDefinition),
-    Dummy
+    Function(FunctionTypeDefinition)
 }
 
 impl PrettyDisplay for TypeDefinition {
@@ -424,8 +423,7 @@ impl PrettyDisplay for TypeDefinition {
 
         match *self {
             Data(ref td) => write!(f, "{}", td.pretty_indented(indent)),
-            Function(ref td) => write!(f, "{}", td.pretty_indented(indent)),
-            Dummy => write!(f, "{}DummyType", indent)
+            Function(ref td) => write!(f, "{}", td.pretty_indented(indent))
         }
     }
 }
@@ -524,7 +522,7 @@ impl Type {
 
     pub fn are_cases_exhaustive<T>(&self, tdt: &TypeDefinitionTable, cases: &[ast::Case<T>]) -> bool {
         if let Type::Defined(type_id) = *self {
-            if let TypeDefinition::Data(ref td) = tdt.defs[type_id] {
+            if let TypeDefinition::Data(ref td) = tdt.get_definition(type_id) {
                 let mut covered = vec![false; td.ctors.len()];
 
                 for c in cases {
@@ -596,7 +594,7 @@ impl <'a> fmt::Display for PrettyType<'a> {
             Bool => write!(f, "bool")?,
             Char => write!(f, "char")?,
             Defined(id) => {
-                match tdt.defs[id] {
+                match tdt.get_definition(id) {
                     Data(ref td) => write!(f, "{}", td.name)?,
                     Function(ref td) => {
                         write!(f, "fun (")?;
@@ -610,8 +608,7 @@ impl <'a> fmt::Display for PrettyType<'a> {
                         }
 
                         write!(f, ") : {}", td.return_type.pretty(tdt))?;
-                    },
-                    Dummy => write!(f, "(dummy type)")?
+                    }
                 }
             },
             Array(ref inner_type, dims) => {
@@ -768,30 +765,76 @@ lazy_static! {
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TypeDefinitionTable {
-    pub defs: Vec<TypeDefinition>
+    #[deprecated]
+    pub defs: Vec<TypeDefinition>,
+    _defs: UnsafeCell<Vec<Option<Box<TypeDefinition>>>>
+}
+
+pub struct TypeDefinitionTableIter<'a>(&'a TypeDefinitionTable, usize);
+
+impl <'a> Iterator for TypeDefinitionTableIter<'a> {
+    type Item = (usize, &'a TypeDefinition);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let TypeDefinitionTableIter(tdt, ref mut id) = *self;
+        let defs = unsafe { &*tdt._defs.get() };
+
+        loop {
+            if *id >= defs.len() {
+                return None;
+            } else if let Some(ref def) = defs[*id] {
+                *id = *id + 1;
+                return Some((*id, unsafe { &*(def.as_ref() as *const TypeDefinition) }));
+            } else {
+                *id = *id + 1;
+            };
+        };
+    }
 }
 
 impl TypeDefinitionTable {
     pub fn new() -> TypeDefinitionTable {
         TypeDefinitionTable {
-            defs: Vec::new()
+            defs: Vec::new(),
+            _defs: UnsafeCell::new(Vec::new())
         }
     }
 
-    pub fn add_definition(&mut self, def: TypeDefinition) -> usize {
-        self.defs.push(def);
-        self.defs.len() - 1
+    pub fn add_dummy_definition(&self) -> usize {
+        let defs = unsafe { &mut *self._defs.get() };
+
+        defs.push(None);
+        defs.len() - 1
     }
 
-    pub fn redefine(&mut self, id: usize, def: TypeDefinition) -> () {
-        self.defs[id] = def;
+    pub fn add_definition(&self, def: TypeDefinition) -> usize {
+        let defs = unsafe { &mut *self._defs.get() };
+
+        defs.push(Some(Box::new(def)));
+        defs.len() - 1
     }
 
-    pub fn get_function_type(&mut self, params: &[Type], return_type: &Type) -> usize {
-        for (id, type_def) in self.defs.iter().enumerate() {
-            if let TypeDefinition::Function(fd) = type_def {
+    pub fn define_type(&self, id: usize, def: TypeDefinition) -> () {
+        let defs = unsafe { &mut *self._defs.get() };
+
+        if defs[id].is_some() {
+            panic!("cannot redefine type more than once");
+        };
+
+        defs[id] = Some(Box::new(def));
+    }
+
+    pub fn get_definition(&self, id: usize) -> &TypeDefinition {
+        let defs = unsafe { &*self._defs.get() };
+
+        unsafe { &*(defs[id].as_ref().unwrap().as_ref() as *const TypeDefinition) }
+    }
+
+    pub fn get_function_type(&self, params: &[Type], return_type: &Type) -> usize {
+        for (id, type_def) in unsafe { &*self._defs.get() }.iter().enumerate() {
+            if let Some(box TypeDefinition::Function(fd)) = type_def {
                 if &fd.params[..] == params && &fd.return_type == return_type {
                     return id;
                 }
@@ -802,6 +845,19 @@ impl TypeDefinitionTable {
             params: params.to_vec(),
             return_type: return_type.clone()
         }))
+    }
+
+    pub fn iter<'a>(&'a self) -> TypeDefinitionTableIter<'a> {
+        TypeDefinitionTableIter(self, 0)
+    }
+}
+
+impl <'a> IntoIterator for &'a TypeDefinitionTable {
+    type Item = (usize, &'a TypeDefinition);
+    type IntoIter = TypeDefinitionTableIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -1061,7 +1117,7 @@ macro_rules! missing_else {
 }
 
 fn resolve_type(
-    tdt: &mut TypeDefinitionTable,
+    tdt: &TypeDefinitionTable,
     symbols: &SymbolTable,
     errors: &mut Vec<(String, Span)>,
     t: &ast::Type,
@@ -1087,7 +1143,7 @@ fn resolve_type(
 }
 
 fn create_symbol_for_decl(
-    tdt: &mut TypeDefinitionTable,
+    tdt: &TypeDefinitionTable,
     symbols: &mut SymbolTable,
     errors: &mut Vec<(String, Span)>,
     decl: ast::Decl
@@ -1130,7 +1186,7 @@ fn create_symbol_for_decl(
                 symbols.add_ctor(ctor.name.clone(), (type_id, i));
             };
 
-            tdt.redefine(type_id, TypeDefinition::Data(type_def));
+            tdt.define_type(type_id, TypeDefinition::Data(type_def));
         },
         ast::DeclType::Fun(name, sig, body) => {
             let params: Vec<_> = sig.params.iter()
@@ -1145,7 +1201,7 @@ fn create_symbol_for_decl(
                     new_params: &[Type],
                     old_sig: usize
                 ) -> bool {
-                    let old_params = if let TypeDefinition::Function(ref td) = tdt.defs[old_sig] {
+                    let old_params = if let TypeDefinition::Function(ref td) = tdt.get_definition(old_sig) {
                         &td.params
                     } else {
                         unreachable!()
@@ -1403,7 +1459,7 @@ fn do_analyze_expression(
             ) -> Vec<(usize, &'a FunctionTypeDefinition)> {
                 match *t {
                     Type::Defined(type_id) => {
-                        if let TypeDefinition::Function(ref typedef) = tdt.defs[type_id] {
+                        if let TypeDefinition::Function(ref typedef) = tdt.get_definition(type_id) {
                             vec![(type_id, typedef)]
                         } else {
                             vec![]
@@ -1412,7 +1468,7 @@ fn do_analyze_expression(
                     Type::Unresolved(ref types) => {
                         types.iter().filter_map(|t| {
                             if let Type::Defined(type_id) = *t {
-                                if let TypeDefinition::Function(ref typedef) = tdt.defs[type_id] {
+                                if let TypeDefinition::Function(ref typedef) = tdt.get_definition(type_id) {
                                     Some((type_id, typedef))
                                 } else {
                                     None
@@ -1515,7 +1571,7 @@ fn do_analyze_expression(
 
             if ctors.len() == 1 {
                 let ctor_id = ctors[0];
-                let ctor = match tdt.defs[ctor_id.0] {
+                let ctor = match tdt.get_definition(ctor_id.0) {
                     TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                     _ => panic!("invalid data type")
                 };
@@ -1528,7 +1584,7 @@ fn do_analyze_expression(
                     let ctor_id = ctors.iter().find(|ctor_id| &ctor_id.0 == expected_type);
 
                     if let Some(ctor_id) = ctor_id {
-                        let ctor = match tdt.defs[ctor_id.0] {
+                        let ctor = match tdt.get_definition(ctor_id.0) {
                             TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                             _ => panic!("invalid data type")
                         };
@@ -1540,7 +1596,7 @@ fn do_analyze_expression(
                 };
 
                 let valid_ctors: Vec<_> = ctors.iter().map(|ctor_id| {
-                    let ctor = match tdt.defs[ctor_id.0] {
+                    let ctor = match tdt.get_definition(ctor_id.0) {
                         TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                         _ => panic!("invalid data type")
                     };
@@ -1628,7 +1684,7 @@ fn get_statement_symbols(
 fn analyze_statement(
     stmt: &mut ast::Stmt,
     features: &HashMap<String, Span>,
-    tdt: &mut TypeDefinitionTable,
+    tdt: &TypeDefinitionTable,
     symbols: &Rc<RefCell<SymbolTable>>,
     expected_return: Option<&Type>,
     errors: &mut Vec<(String, Span)>
@@ -1781,7 +1837,7 @@ fn analyze_statement(
             {
                 let val_type = analyze_expression(val, features, tdt, &symbols.borrow(), None, errors);
                 let typedef = if let Type::Defined(ref type_id) = val_type {
-                    if let TypeDefinition::Data(ref typedef) = tdt.defs[*type_id] {
+                    if let TypeDefinition::Data(ref typedef) = tdt.get_definition(*type_id) {
                         Some(typedef)
                     } else {
                         None
@@ -1828,7 +1884,7 @@ fn analyze_statement(
 
 fn populate_block_symbol_table(
     features: &HashMap<String, Span>,
-    tdt: &mut TypeDefinitionTable,
+    tdt: &TypeDefinitionTable,
     block: &mut ast::Block,
     expected_return: Option<&Type>,
     errors: &mut Vec<(String, Span)>
@@ -1844,7 +1900,7 @@ fn populate_block_symbol_table(
         // processed until after all declarations have been processed.
         for decl in &mut block.decls {
             if let ast::DeclType::Data(ref name, ref mut type_id, _) = decl.node {
-                *type_id = tdt.add_definition(TypeDefinition::Dummy);
+                *type_id = tdt.add_dummy_definition();
                 if let Some((_, old_type_span)) = symbols.find_imm_named_type(&name) {
                     errors.push(type_already_defined!(name, decl.span, old_type_span));
                 } else {
@@ -1884,14 +1940,14 @@ fn populate_block_symbol_table(
 
 fn populate_function_symbol_table(
     features: &HashMap<String, Span>,
-    tdt: &mut TypeDefinitionTable,
+    tdt: &TypeDefinitionTable,
     parent: &Rc<RefCell<SymbolTable>>,
     sym: &FunSymbol,
     span: &Span,
     errors: &mut Vec<(String, Span)>
 ) {
     let block = &mut sym.body.borrow_mut();
-    let return_type = if let TypeDefinition::Function(ref sig) = &tdt.defs[sym.sig] {
+    let return_type = if let TypeDefinition::Function(ref sig) = tdt.get_definition(sym.sig) {
         sig.return_type.clone()
     } else {
         panic!("Invalid function signature")
