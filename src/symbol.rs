@@ -1952,7 +1952,7 @@ fn populate_function_symbol_table(
                 };
             }
 
-            for s in &block.stmts[1..] {
+            for s in &block.stmts[..(block.stmts.len() - 1)] {
                 check_no_return(s, errors);
             };
         };
