@@ -131,7 +131,7 @@ parser! {
         loc[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),
         Print expr[val] => Stmt::print(val).at(span!()),
         CLPar block[b] CRPar => Stmt::block(b).at(span!()),
-        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs).at(span!()),
+        Case expr[e] Of CLPar cases_stmt[cs] CRPar => Stmt::case(e, cs).at(span!()),
         Return expr[e] => Stmt::return_value(e).at(span!())
     }
 
@@ -148,14 +148,14 @@ parser! {
         loc[l] SLPar expr[e] SRPar => Expr::index(l, e).at(span!())
     }
 
-    case: Case {
+    case_stmt: Case<Stmt> {
         cid_with_span[(cid, span)] Arrow stmt[s] => Case::new(cid, vec![], s).at(span),
         cid_with_span[(cid, span)] LPar var_list[vs] RPar Arrow stmt[s] => Case::new(cid, vs, s).at(span)
     }
 
-    cases: Vec<Case> {
-        case[c] => vec![c],
-        cases[mut cs] Slash case[c] => {
+    cases_stmt: Vec<Case<Stmt>> {
+        case_stmt[c] => vec![c],
+        cases_stmt[mut cs] Slash case_stmt[c] => {
             cs.push(c);
             cs
         }

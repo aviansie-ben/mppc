@@ -522,7 +522,7 @@ impl Type {
         }
     }
 
-    pub fn are_cases_exhaustive(&self, tdt: &TypeDefinitionTable, cases: &[ast::Case]) -> bool {
+    pub fn are_cases_exhaustive<T>(&self, tdt: &TypeDefinitionTable, cases: &[ast::Case<T>]) -> bool {
         if let Type::Defined(type_id) = *self {
             if let TypeDefinition::Data(ref td) = tdt.defs[type_id] {
                 let mut covered = vec![false; td.ctors.len()];
@@ -1710,11 +1710,11 @@ fn analyze_statement(
         },
         ast::StmtType::Case(ref mut val, ref mut cases) => {
             fn analyze_case_error(
-                case: &mut ast::Case,
+                case: &mut ast::Case<ast::Stmt>,
                 symbols: &Rc<RefCell<SymbolTable>>,
                 errors: &mut Vec<(String, Span)>
             ) {
-                let mut sub_symbols = get_statement_symbols(&mut case.stmt).borrow_mut();
+                let mut sub_symbols = get_statement_symbols(&mut case.branch).borrow_mut();
                 sub_symbols.set_parent(symbols.clone());
 
                 for (name, span) in case.vars.drain(..) {
@@ -1735,7 +1735,7 @@ fn analyze_statement(
             }
 
             fn analyze_case(
-                case: &mut ast::Case,
+                case: &mut ast::Case<ast::Stmt>,
                 typedef: &DataTypeDefinition,
                 symbols: &Rc<RefCell<SymbolTable>>,
                 errors: &mut Vec<(String, Span)>
@@ -1758,7 +1758,7 @@ fn analyze_statement(
                     return;
                 };
 
-                let mut sub_symbols = get_statement_symbols(&mut case.stmt).borrow_mut();
+                let mut sub_symbols = get_statement_symbols(&mut case.branch).borrow_mut();
                 sub_symbols.set_parent(symbols.clone());
 
                 for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
@@ -1811,7 +1811,7 @@ fn analyze_statement(
             };
 
             for case in cases {
-                analyze_statement(&mut case.stmt, features, tdt, symbols, expected_return, errors);
+                analyze_statement(&mut case.branch, features, tdt, symbols, expected_return, errors);
             };
         },
         ast::StmtType::Return(ref mut val) => {
@@ -1942,7 +1942,7 @@ fn populate_function_symbol_table(
                     },
                     Case(_, ref cases) => {
                         for c in cases {
-                            check_no_return(&c.stmt, errors);
+                            check_no_return(&c.branch, errors);
                         };
                     },
                     Return(_) => {

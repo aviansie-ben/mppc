@@ -664,27 +664,27 @@ impl PrettyDisplay for Expr {
 }
 
 #[derive(Debug, Clone)]
-pub struct Case {
+pub struct Case<T> {
     pub cid: String,
     pub ctor_id: usize,
     pub vars: Vec<(String, Span)>,
     pub var_bindings: Vec<usize>,
-    pub stmt: Stmt,
+    pub branch: T,
     pub span: Span
 }
 
-impl Case {
-    pub fn new(cid: String, vars: Vec<(String, Span)>, stmt: Stmt) -> Case {
-        Case { cid: cid, ctor_id: !0, vars: vars, var_bindings: Vec::new(), stmt: stmt, span: Span::dummy() }
+impl <T> Case<T> {
+    pub fn new(cid: String, vars: Vec<(String, Span)>, branch: T) -> Case<T> {
+        Case { cid: cid, ctor_id: !0, vars: vars, var_bindings: Vec::new(), branch: branch, span: Span::dummy() }
     }
 
-    pub fn at(mut self, span: Span) -> Case {
+    pub fn at(mut self, span: Span) -> Case<T> {
         self.span = span;
         self
     }
 }
 
-impl PrettyDisplay for Case {
+impl <T: PrettyDisplay> PrettyDisplay for Case<T> {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
         let mut next_indent = indent.to_string();
         next_indent.push_str(" ");
@@ -711,7 +711,7 @@ impl PrettyDisplay for Case {
             write!(f, " [CTOR: {}]", self.ctor_id)?;
         };
 
-        write!(f, "\n{}", self.stmt.pretty_indented(&next_indent))?;
+        write!(f, "\n{}", self.branch.pretty_indented(&next_indent))?;
 
         Result::Ok(())
     }
@@ -725,7 +725,7 @@ pub enum StmtType {
     Assign(Expr, Expr),
     Print(Expr),
     Block(Block),
-    Case(Expr, Vec<Case>),
+    Case(Expr, Vec<Case<Stmt>>),
     Return(Expr)
 }
 
@@ -768,7 +768,7 @@ impl Stmt {
         Stmt::new(StmtType::Block(block))
     }
 
-    pub fn case(val: Expr, cases: Vec<Case>) -> Stmt {
+    pub fn case(val: Expr, cases: Vec<Case<Stmt>>) -> Stmt {
         Stmt::new(StmtType::Case(val, cases))
     }
 
@@ -792,7 +792,7 @@ impl Stmt {
             },
             WhileDo(Expr { node: ExprType::Bool(true), .. }, _) => true,
             Block(ref block) => block.stmts.iter().any(|s| s.will_return(tdt)),
-            Case(ref val, ref cases) => val.val_type.are_cases_exhaustive(tdt, cases) && cases.iter().all(|c| c.stmt.will_return(tdt)),
+            Case(ref val, ref cases) => val.val_type.are_cases_exhaustive(tdt, cases) && cases.iter().all(|c| c.branch.will_return(tdt)),
             Return(_) => true,
             _ => false
         }
