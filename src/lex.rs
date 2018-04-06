@@ -5,6 +5,8 @@ use util;
 
 #[derive(Debug, Clone)]
 pub enum Token {
+    Feature(String),
+
     Add,
     Sub,
     Mul,
@@ -79,6 +81,8 @@ pub enum Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Token::Feature(ref feature) => write!(f, "@feature({})", feature),
+
             Token::Add => write!(f, "'+'"),
             Token::Sub => write!(f, "'-'"),
             Token::Mul => write!(f, "'*'"),
@@ -257,6 +261,7 @@ impl fmt::Debug for Span {
 lexer! {
     fn next_token_standard(text: 'a) -> (Token, &'a str);
 
+    r#"@feature\([a-zA-Z0-9_]+\)"# => (Token::Feature(text[9..text.len() - 1].to_owned()), text),
     r#"\+"# => (Token::Add, text),
     r#"-"# => (Token::Sub, text),
     r#"\*"# => (Token::Mul, text),

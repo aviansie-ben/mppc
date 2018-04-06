@@ -1,5 +1,7 @@
 #![allow(unused_mut)]
 
+use std::collections::HashMap;
+
 use ast::{Block, Case, DataCons, Decl, Expr, FunParam, FunSig, MultiDecl, Program, Stmt, Type, VarSpec};
 use lex::{Span, Token, TokenStream};
 
@@ -11,7 +13,19 @@ parser! {
     (a, b) { Span::combine(a, b) }
 
     program: Program {
-        block[b] => Program::new(b)
+        features[fs] block[b] => Program::new(b, fs)
+    }
+
+    feature: (String, Span) {
+        Feature(f) => (f, span!())
+    }
+
+    features: HashMap<String, Span> {
+        => HashMap::new(),
+        features[mut fs] feature[(f, span)] => {
+            fs.insert(f, span);
+            fs
+        }
     }
 
     block: Block {
@@ -102,14 +116,8 @@ parser! {
     }
 
     fun_body: Vec<Stmt> {
-        Begin stmts[mut ss] Return expr[e] Semicolon End => {
-            ss.push(Stmt::return_value(e));
-            ss
-        },
-        stmts[mut ss] Return expr[e] Semicolon => {
-            ss.push(Stmt::return_value(e));
-            ss
-        }
+        Begin stmts[mut ss] End => ss,
+        stmts[mut ss] => ss
     }
 
     stmt: Stmt {
@@ -121,7 +129,8 @@ parser! {
         loc[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),
         Print expr[val] => Stmt::print(val).at(span!()),
         CLPar block[b] CRPar => Stmt::block(b).at(span!()),
-        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs).at(span!())
+        Case expr[e] Of CLPar cases[cs] CRPar => Stmt::case(e, cs).at(span!()),
+        Return expr[e] => Stmt::return_value(e).at(span!())
     }
 
     stmts: Vec<Stmt> {

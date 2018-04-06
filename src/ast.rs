@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,12 +10,13 @@ use util::{DeferredDisplay, PrettyDisplay};
 #[derive(Debug, Clone)]
 pub struct Program {
     pub block: Block,
+    pub features: HashMap<String, Span>,
     pub types: symbol::TypeDefinitionTable
 }
 
 impl Program {
-    pub fn new(block: Block) -> Program {
-        Program { block: block, types: symbol::TypeDefinitionTable::new() }
+    pub fn new(block: Block, features: HashMap<String, Span>) -> Program {
+        Program { block: block, features: features, types: symbol::TypeDefinitionTable::new() }
     }
 }
 
@@ -22,6 +24,10 @@ impl PrettyDisplay for Program {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result {
         let mut next_indent = indent.to_string();
         next_indent.push_str(" ");
+
+        for (feature, _) in &self.features {
+            write!(f, "{}Feature {}\n", indent, feature)?;
+        }
 
         for (id, td) in self.types.defs.iter().enumerate() {
             write!(f, "{}TypeDef {}\n{}\n", indent, id, td.pretty_indented(&next_indent))?;
@@ -769,6 +775,18 @@ impl Stmt {
     pub fn at(mut self, span: Span) -> Stmt {
         self.span = span;
         self
+    }
+
+    pub fn will_return(&self) -> bool {
+        use ast::StmtType::*;
+
+        match self.node {
+            IfThenElse(_, ref then_stmt, ref else_stmt) => then_stmt.will_return() && else_stmt.will_return(),
+            Block(ref block) => block.stmts.iter().any(|s| s.will_return()),
+            Case(_, ref cases) => cases.iter().all(|c| c.stmt.will_return()),
+            Return(_) => true,
+            _ => false
+        }
     }
 }
 
