@@ -777,14 +777,14 @@ impl Stmt {
         self
     }
 
-    pub fn will_return(&self) -> bool {
+    pub fn will_return(&self, tdt: &symbol::TypeDefinitionTable) -> bool {
         use ast::StmtType::*;
 
         match self.node {
-            IfThenElse(_, ref then_stmt, ref else_stmt) => then_stmt.will_return() && else_stmt.will_return(),
+            IfThenElse(_, ref then_stmt, ref else_stmt) => then_stmt.will_return(tdt) && else_stmt.will_return(tdt),
             WhileDo(Expr { node: ExprType::Bool(true), .. }, _) => true,
-            Block(ref block) => block.stmts.iter().any(|s| s.will_return()),
-            Case(_, ref cases) => cases.iter().all(|c| c.stmt.will_return()),
+            Block(ref block) => block.stmts.iter().any(|s| s.will_return(tdt)),
+            Case(ref val, ref cases) => val.val_type.are_cases_exhaustive(tdt, cases) && cases.iter().all(|c| c.stmt.will_return(tdt)),
             Return(_) => true,
             _ => false
         }

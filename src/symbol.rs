@@ -521,6 +521,26 @@ impl Type {
             Type::Unresolved(result)
         }
     }
+
+    pub fn are_cases_exhaustive(&self, tdt: &TypeDefinitionTable, cases: &[ast::Case]) -> bool {
+        if let Type::Defined(type_id) = *self {
+            if let TypeDefinition::Data(ref td) = tdt.defs[type_id] {
+                let mut covered = vec![false; td.ctors.len()];
+
+                for c in cases {
+                    if c.ctor_id != !0 {
+                        covered[c.ctor_id] = true;
+                    };
+                };
+
+                covered.iter().all(|&b| b)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
 }
 
 impl fmt::Display for Type {
@@ -1875,7 +1895,7 @@ fn populate_function_symbol_table(
     );
 
     if features.contains_key("return_anywhere") {
-        if !block.stmts.iter().any(|s| s.will_return()) {
+        if !block.stmts.iter().any(|s| s.will_return(tdt)) {
             errors.push(missing_return_anywhere!(*span));
         };
     } else {
