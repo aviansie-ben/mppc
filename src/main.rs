@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::fs::{File};
 use std::io::{BufRead,BufReader,Write};
 
+pub mod analysis;
 pub mod ast;
 pub mod codegen;
 pub mod il;
@@ -233,7 +234,7 @@ fn analyze_command<'a>(args: &ArgMatches<'a>) {
             tokens.drain_tokens();
         },
         Result::Ok(ref mut program) => {
-            symbol::populate_symbol_tables(program, &mut errors);
+            analysis::populate_symbol_tables(program, &mut errors);
         }
     }
 
