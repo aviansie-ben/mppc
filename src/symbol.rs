@@ -769,6 +769,7 @@ lazy_static! {
         fs.insert("return_anywhere");
         fs.insert("optional_else");
         fs.insert("block_expr");
+        fs.insert("case_expr");
 
         fs
     };
@@ -1330,6 +1331,138 @@ fn analyze_call_signature(
     };
 }
 
+fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
+    val: &mut ast::Expr,
+    cases: &mut [ast::Case<T>],
+    get_symbols: U,
+    features: &HashMap<String, Span>,
+    tdt: &TypeDefinitionTable,
+    symbols: &Rc<RefCell<SymbolTable>>,
+    expected_return: Option<&Type>,
+    errors: &mut Vec<(String, Span)>
+) -> () {
+    fn analyze_case_error<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
+        case: &mut ast::Case<T>,
+        get_symbols: &U,
+        symbols: &Rc<RefCell<SymbolTable>>,
+        errors: &mut Vec<(String, Span)>
+    ) {
+        let mut sub_symbols = get_symbols(&mut case.branch).borrow_mut();
+        sub_symbols.set_parent(symbols.clone());
+
+        for (name, span) in case.vars.drain(..) {
+            if expect_name_not_defined!(sub_symbols, errors, &name, span) {
+                case.var_bindings.push(sub_symbols.add_symbol(Symbol {
+                    id: 0,
+                    name: name,
+                    span: span,
+                    node: SymbolType::Var(VarSymbol {
+                        val_type: Type::Error,
+                        dims: RefCell::new(vec![])
+                    })
+                }));
+            } else {
+                case.var_bindings.push(!0);
+            };
+        };
+    }
+
+    fn analyze_case<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
+        case: &mut ast::Case<T>,
+        typedef: &DataTypeDefinition,
+        get_symbols: &U,
+        symbols: &Rc<RefCell<SymbolTable>>,
+        errors: &mut Vec<(String, Span)>
+    ) {
+        let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
+            ctor
+        } else {
+            errors.push(constructor_not_defined!(case.cid, case.span, typedef.name));
+
+            analyze_case_error(case, get_symbols, symbols, errors);
+            return;
+        };
+
+        case.ctor_id = ctor_id;
+
+        if ctor.args.len() != case.vars.len() {
+            errors.push(wrong_number_of_args!(case.vars.len(), ctor.args.len(), case.span));
+
+            analyze_case_error(case, get_symbols, symbols, errors);
+            return;
+        };
+
+        let mut sub_symbols = get_symbols(&mut case.branch).borrow_mut();
+        sub_symbols.set_parent(symbols.clone());
+
+        for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
+            if expect_name_not_defined!(sub_symbols, errors, &name, span) {
+                case.var_bindings.push(sub_symbols.add_symbol(Symbol {
+                    id: 0,
+                    name: name,
+                    span: span,
+                    node: SymbolType::Var(VarSymbol {
+                        val_type: val_type.clone(),
+                        dims: RefCell::new(vec![])
+                    })
+                }));
+            } else {
+                case.var_bindings.push(!0);
+            };
+        };
+    }
+
+    {
+        let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
+        let typedef = if let Type::Defined(ref type_id) = val_type {
+            if let TypeDefinition::Data(ref typedef) = tdt.get_definition(*type_id) {
+                Some(typedef)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(typedef) = typedef {
+            let mut handled_cases: Vec<(usize, Span)> = Vec::new();
+            for case in cases.iter_mut() {
+                analyze_case(case, typedef, &get_symbols, symbols, errors);
+
+                if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
+                    errors.push(duplicate_case!(case.cid, case.span, prev_span));
+                } else {
+                    handled_cases.push((case.ctor_id, case.span));
+                };
+            };
+        } else {
+            errors.push(cannot_pattern_match!(tdt, val));
+
+            for case in cases.iter_mut() {
+                analyze_case_error(case, &get_symbols, symbols, errors);
+            };
+        };
+    };
+}
+
+fn get_expression_symbols(
+    expr: &mut ast::Expr
+) -> &Rc<RefCell<SymbolTable>> {
+    if let ast::ExprType::Block(ref block, _) = expr.node {
+        return &block.symbols;
+    };
+
+    let span = expr.span;
+    let old_expr = mem::replace(expr, ast::Expr::block(ast::Block::new(vec![], vec![]), None).at(span));
+    expr.synthetic = true;
+    if let ast::ExprType::Block(ref block, ref mut result) = expr.node {
+        *result = Some(Box::new(old_expr));
+        &block.symbols
+    } else {
+        unreachable!();
+    }
+}
+
 fn do_analyze_expression(
     expr: &mut ast::Expr,
     features: &HashMap<String, Span>,
@@ -1663,14 +1796,21 @@ fn do_analyze_expression(
         ast::ExprType::Char(_) => return Type::Char,
         ast::ExprType::Block(ref mut block, ref mut result) => {
             if expr.val_type == Type::Unknown {
-                if !features.contains_key("block_expr") {
+                if !expr.synthetic && !features.contains_key("block_expr") {
                     errors.push((
                         format!("block expression support is not enabled (did you mean to add `@feature(block_expr)'?)"),
                         expr.span
                     ));
                 };
 
-                block.symbols.borrow_mut().set_parent(symbols.clone());
+                {
+                    let sub_symbols = &mut block.symbols.borrow_mut();
+
+                    if sub_symbols.parent.is_none() {
+                        sub_symbols.set_parent(symbols.clone());
+                    }
+                };
+
                 populate_block_symbol_table(features, tdt, block, expected_return, errors);
             };
 
@@ -1693,6 +1833,74 @@ fn do_analyze_expression(
                 ));
                 return Type::Error;
             };
+        },
+        ast::ExprType::Case(ref mut val, ref mut cases) => {
+            if expr.val_type == Type::Unknown {
+                if !expr.synthetic && !features.contains_key("case_expr") {
+                    errors.push((
+                        format!("case expression support is not enabled (did you mean to add `@feature(case_expr)'?)"),
+                        expr.span
+                    ));
+                };
+
+                analyze_cases(val, cases, get_expression_symbols, features, tdt, symbols, expected_return, errors);
+            };
+
+            let result_type = if let Some(expected_type) = expected_type {
+                expected_type.clone()
+            } else {
+                let mut result_type = Type::Never;
+
+                for c in cases.iter_mut() {
+                    let next_result_type = analyze_expression(
+                        &mut c.branch,
+                        features,
+                        tdt,
+                        symbols,
+                        None,
+                        expected_return,
+                        errors
+                    );
+
+                    if let Some(next_result_type) = Type::least_upper_bound(&result_type, &next_result_type) {
+                        result_type = next_result_type;
+                    };
+                };
+
+                let next_result_type = if let Type::Unresolved(ref mut types) = result_type {
+                    if types.len() == 1 {
+                        Some(types.remove(0))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(next_result_type) = next_result_type {
+                    next_result_type
+                } else {
+                    result_type
+                }
+            };
+
+            if result_type.is_resolved() {
+                for c in cases.iter_mut() {
+                    analyze_expression(
+                        &mut c.branch,
+                        features,
+                        tdt,
+                        symbols,
+                        Some(&result_type),
+                        expected_return,
+                        errors
+                    );
+
+                    expect_convert_exact!(tdt, errors, c.branch, &result_type);
+                };
+            };
+
+            return result_type;
         }
     };
 }
@@ -1815,106 +2023,7 @@ fn analyze_statement(
             stmt.will_return = inner_block.stmts.iter().any(|s| s.will_return);
         },
         ast::StmtType::Case(ref mut val, ref mut cases) => {
-            fn analyze_case_error(
-                case: &mut ast::Case<ast::Stmt>,
-                symbols: &Rc<RefCell<SymbolTable>>,
-                errors: &mut Vec<(String, Span)>
-            ) {
-                let mut sub_symbols = get_statement_symbols(&mut case.branch).borrow_mut();
-                sub_symbols.set_parent(symbols.clone());
-
-                for (name, span) in case.vars.drain(..) {
-                    if expect_name_not_defined!(sub_symbols, errors, &name, span) {
-                        case.var_bindings.push(sub_symbols.add_symbol(Symbol {
-                            id: 0,
-                            name: name,
-                            span: span,
-                            node: SymbolType::Var(VarSymbol {
-                                val_type: Type::Error,
-                                dims: RefCell::new(vec![])
-                            })
-                        }));
-                    } else {
-                        case.var_bindings.push(!0);
-                    };
-                };
-            }
-
-            fn analyze_case(
-                case: &mut ast::Case<ast::Stmt>,
-                typedef: &DataTypeDefinition,
-                symbols: &Rc<RefCell<SymbolTable>>,
-                errors: &mut Vec<(String, Span)>
-            ) {
-                let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
-                    ctor
-                } else {
-                    errors.push(constructor_not_defined!(case.cid, case.span, typedef.name));
-
-                    analyze_case_error(case, symbols, errors);
-                    return;
-                };
-
-                case.ctor_id = ctor_id;
-
-                if ctor.args.len() != case.vars.len() {
-                    errors.push(wrong_number_of_args!(case.vars.len(), ctor.args.len(), case.span));
-
-                    analyze_case_error(case, symbols, errors);
-                    return;
-                };
-
-                let mut sub_symbols = get_statement_symbols(&mut case.branch).borrow_mut();
-                sub_symbols.set_parent(symbols.clone());
-
-                for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
-                    if expect_name_not_defined!(sub_symbols, errors, &name, span) {
-                        case.var_bindings.push(sub_symbols.add_symbol(Symbol {
-                            id: 0,
-                            name: name,
-                            span: span,
-                            node: SymbolType::Var(VarSymbol {
-                                val_type: val_type.clone(),
-                                dims: RefCell::new(vec![])
-                            })
-                        }));
-                    } else {
-                        case.var_bindings.push(!0);
-                    };
-                };
-            }
-
-            {
-                let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
-                let typedef = if let Type::Defined(ref type_id) = val_type {
-                    if let TypeDefinition::Data(ref typedef) = tdt.get_definition(*type_id) {
-                        Some(typedef)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(typedef) = typedef {
-                    let mut handled_cases: Vec<(usize, Span)> = Vec::new();
-                    for case in cases.iter_mut() {
-                        analyze_case(case, typedef, symbols, errors);
-
-                        if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
-                            errors.push(duplicate_case!(case.cid, case.span, prev_span));
-                        } else {
-                            handled_cases.push((case.ctor_id, case.span));
-                        };
-                    };
-                } else {
-                    errors.push(cannot_pattern_match!(tdt, val));
-
-                    for case in cases.iter_mut() {
-                        analyze_case_error(case, symbols, errors);
-                    };
-                };
-            };
+            analyze_cases(val, cases, get_statement_symbols, features, tdt, symbols, expected_return, errors);
 
             for case in cases.iter_mut() {
                 analyze_statement(&mut case.branch, features, tdt, symbols, expected_return, errors);

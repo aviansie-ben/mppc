@@ -419,7 +419,8 @@ pub enum ExprType {
     Real(f64),
     Bool(bool),
     Char(char),
-    Block(Block, Option<Box<Expr>>)
+    Block(Block, Option<Box<Expr>>),
+    Case(Box<Expr>, Vec<Case<Expr>>)
 }
 
 #[derive(Debug, Clone)]
@@ -427,12 +428,19 @@ pub struct Expr {
     pub node: ExprType,
     pub span: Span,
     pub val_type: symbol::Type,
-    pub assignable: bool
+    pub assignable: bool,
+    pub synthetic: bool
 }
 
 impl Expr {
     pub fn new(node: ExprType) -> Expr {
-        Expr { node: node, span: Span::dummy(), val_type: symbol::Type::Unknown, assignable: false }
+        Expr {
+            node: node,
+            span: Span::dummy(),
+            val_type: symbol::Type::Unknown,
+            assignable: false,
+            synthetic: false
+        }
     }
 
     pub fn or(lhs: Expr, rhs: Expr) -> Expr {
@@ -537,6 +545,10 @@ impl Expr {
 
     pub fn block(block: Block, result: Option<Expr>) -> Expr {
         Expr::new(ExprType::Block(block, result.map(Box::new)))
+    }
+
+    pub fn case(val: Expr, cases: Vec<Case<Expr>>) -> Expr {
+        Expr::new(ExprType::Case(Box::new(val), cases))
     }
 
     pub fn at(mut self, span: Span) -> Expr {
@@ -668,6 +680,13 @@ impl PrettyDisplay for Expr {
 
                 if let Some(ref result) = *result {
                     write!(f, "\n{}", result.pretty_indented(&next_indent))?;
+                };
+            },
+            Case(ref val, ref cases) => {
+                write!(f, "{}Case\n{}", indent, val.pretty_indented(&next_indent))?;
+
+                for c in cases {
+                    write!(f, "\n{}", c.pretty_indented(&next_indent))?;
                 };
             }
         };

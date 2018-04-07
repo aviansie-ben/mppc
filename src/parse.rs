@@ -229,6 +229,20 @@ parser! {
             Block::new(ds, ss),
             e
         ).at(span!()),
+        Case expr[e] Of CLPar cases_expr[cs] CRPar => Expr::case(e, cs).at(span!())
+    }
+
+    case_expr: Case<Expr> {
+        cid_with_span[(cid, span)] Arrow expr[e] => Case::new(cid, vec![], e).at(span),
+        cid_with_span[(cid, span)] LPar var_list[vs] RPar Arrow expr[e] => Case::new(cid, vs, e).at(span)
+    }
+
+    cases_expr: Vec<Case<Expr>> {
+        case_expr[c] => vec![c],
+        cases_expr[mut cs] Slash case_expr[c] => {
+            cs.push(c);
+            cs
+        }
     }
 
     arg_list: Vec<Expr> {
