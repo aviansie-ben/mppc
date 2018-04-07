@@ -419,6 +419,7 @@ pub enum ExprType {
     Real(f64),
     Bool(bool),
     Char(char),
+    Block(Block, Option<Box<Expr>>)
 }
 
 #[derive(Debug, Clone)]
@@ -532,6 +533,10 @@ impl Expr {
 
     pub fn negate(val: Expr) -> Expr {
         Expr::new(ExprType::UnaryOp(UnaryOp::Neg, Box::new(val), symbol::UnaryOp::Unknown))
+    }
+
+    pub fn block(block: Block, result: Option<Expr>) -> Expr {
+        Expr::new(ExprType::Block(block, result.map(Box::new)))
     }
 
     pub fn at(mut self, span: Span) -> Expr {
@@ -657,7 +662,14 @@ impl PrettyDisplay for Expr {
             Int(ref val) => write!(f, "{}Int {}{}", indent, val, meta_display)?,
             Real(ref val) => write!(f, "{}Real {}{}", indent, val, meta_display)?,
             Bool(ref val) => write!(f, "{}Bool {}{}", indent, val, meta_display)?,
-            Char(ref val) => write!(f, "{}Char {:?}{}", indent, val, meta_display)?
+            Char(ref val) => write!(f, "{}Char {:?}{}", indent, val, meta_display)?,
+            Block(ref block, ref result) => {
+                write!(f, "{}", block.pretty_indented(indent))?;
+
+                if let Some(ref result) = *result {
+                    write!(f, "\n{}", result.pretty_indented(&next_indent))?;
+                };
+            }
         };
         Result::Ok(())
     }
@@ -732,12 +744,13 @@ pub enum StmtType {
 #[derive(Debug, Clone)]
 pub struct Stmt {
     pub node: StmtType,
-    pub span: Span
+    pub span: Span,
+    pub will_return: bool
 }
 
 impl Stmt {
     pub fn new(node: StmtType) -> Stmt {
-        Stmt { node: node, span: Span::dummy() }
+        Stmt { node: node, span: Span::dummy(), will_return: false }
     }
 
     pub fn if_then_else(cond: Expr, true_stmt: Stmt, false_stmt: Stmt) -> Stmt {
@@ -779,23 +792,6 @@ impl Stmt {
     pub fn at(mut self, span: Span) -> Stmt {
         self.span = span;
         self
-    }
-
-    pub fn will_return(&self, tdt: &symbol::TypeDefinitionTable) -> bool {
-        use ast::StmtType::*;
-
-        match self.node {
-            IfThenElse(_, ref then_stmt, ref else_stmt) => if let Some(else_stmt) = else_stmt {
-                then_stmt.will_return(tdt) && else_stmt.will_return(tdt)
-            } else {
-                false
-            },
-            WhileDo(Expr { node: ExprType::Bool(true), .. }, _) => true,
-            Block(ref block) => block.stmts.iter().any(|s| s.will_return(tdt)),
-            Case(ref val, ref cases) => val.val_type.are_cases_exhaustive(tdt, cases) && cases.iter().all(|c| c.branch.will_return(tdt)),
-            Return(_) => true,
-            _ => false
-        }
     }
 }
 

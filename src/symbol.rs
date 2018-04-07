@@ -436,6 +436,7 @@ pub enum Type {
     Char,
     Defined(usize),
     Array(Box<Type>, u32),
+    Never,
     Unresolved(Vec<Type>),
     Unknown,
     Error
@@ -457,6 +458,10 @@ impl Type {
         if t1 == &Type::Error || t2 == &Type::Error {
             Some(Type::Error)
         } else if t1 == t2 {
+            Some(t1.clone())
+        } else if t1 == &Type::Never {
+            Some(t2.clone())
+        } else if t2 == &Type::Never {
             Some(t1.clone())
         } else if let (Type::Unresolved(ref t1s), Type::Unresolved(ref t2s)) = (t1, t2) {
             let mut ts: Vec<_> = t1s.iter().filter(|t| t2s.contains(t)).map(|t| t.clone()).collect();
@@ -504,6 +509,7 @@ impl Type {
             for t in types {
                 match t {
                     Type::Unresolved(ts) => do_union(ts, result),
+                    Type::Never => {},
                     t => if !result.contains(&t) { result.push(t); }
                 };
             };
@@ -557,6 +563,7 @@ impl fmt::Display for Type {
                     write!(f, "[]")?;
                 };
             },
+            Never => write!(f, "(never type)")?,
             Unresolved(ref possible_types) => {
                 if possible_types.len() == 1 {
                     write!(f, "{} (ambiguous)", possible_types[0])?;
@@ -618,6 +625,7 @@ impl <'a> fmt::Display for PrettyType<'a> {
                     write!(f, "[]")?;
                 };
             },
+            Never => write!(f, "(never type)")?,
             Unresolved(ref possible_types) => {
                 if possible_types.len() == 1 {
                     write!(f, "{} (ambiguous)", possible_types[0].pretty(tdt))?;
@@ -760,6 +768,7 @@ lazy_static! {
 
         fs.insert("return_anywhere");
         fs.insert("optional_else");
+        fs.insert("block_expr");
 
         fs
     };
@@ -1307,7 +1316,8 @@ fn analyze_call_signature(
     params: &mut [ast::Expr],
     features: &HashMap<String, Span>,
     tdt: &TypeDefinitionTable,
-    symbols: &SymbolTable,
+    symbols: &Rc<RefCell<SymbolTable>>,
+    expected_return: Option<&Type>,
     errors: &mut Vec<(String, Span)>
 ) {
     if params.len() != expected_types.len() {
@@ -1315,7 +1325,7 @@ fn analyze_call_signature(
     };
 
     for (et, param) in expected_types.iter().zip(params.iter_mut()) {
-        analyze_expression(param, features, tdt, symbols, Some(et), errors);
+        analyze_expression(param, features, tdt, symbols, Some(et), expected_return, errors);
         expect_convert_exact!(tdt, errors, param, et);
     };
 }
@@ -1324,15 +1334,16 @@ fn do_analyze_expression(
     expr: &mut ast::Expr,
     features: &HashMap<String, Span>,
     tdt: &TypeDefinitionTable,
-    symbols: &SymbolTable,
+    symbols: &Rc<RefCell<SymbolTable>>,
     expected_type: Option<&Type>,
+    expected_return: Option<&Type>,
     errors: &mut Vec<(String, Span)>
 ) -> Type {
     match expr.node {
         ast::ExprType::BinaryOp(op, ref mut lhs, ref mut rhs, ref mut sym_op) => {
             let val_types = [
-                analyze_expression(lhs, features, tdt, symbols, None, errors),
-                analyze_expression(rhs, features, tdt, symbols, None, errors)
+                analyze_expression(lhs, features, tdt, symbols, None, expected_return, errors),
+                analyze_expression(rhs, features, tdt, symbols, None, expected_return, errors)
             ];
 
             if val_types[0] == Type::Error || val_types[1] == Type::Error {
@@ -1357,8 +1368,8 @@ fn do_analyze_expression(
             };
 
             if let Some(&(ref params, ref result, op)) = op_impl {
-                analyze_expression(lhs, features, tdt, symbols, Some(&params[0]), errors);
-                analyze_expression(rhs, features, tdt, symbols, Some(&params[1]), errors);
+                analyze_expression(lhs, features, tdt, symbols, Some(&params[0]), expected_return, errors);
+                analyze_expression(rhs, features, tdt, symbols, Some(&params[1]), expected_return, errors);
                 *sym_op = op;
 
                 return result.clone();
@@ -1368,7 +1379,7 @@ fn do_analyze_expression(
             };
         },
         ast::ExprType::UnaryOp(op, ref mut val, ref mut sym_op) => {
-            let val_types = [analyze_expression(val, features, tdt, symbols, None, errors)];
+            let val_types = [analyze_expression(val, features, tdt, symbols, None, expected_return, errors)];
 
             if val_types[0] == Type::Error {
                 return Type::Error;
@@ -1392,7 +1403,7 @@ fn do_analyze_expression(
             };
 
             if let Some(&(ref params, ref result, op)) = op_impl {
-                analyze_expression(val, features, tdt, symbols, Some(&params[0]), errors);
+                analyze_expression(val, features, tdt, symbols, Some(&params[0]), expected_return, errors);
                 *sym_op = op;
 
                 return result.clone();
@@ -1402,7 +1413,7 @@ fn do_analyze_expression(
             };
         },
         ast::ExprType::Size(ref mut val, dim) => {
-            let val_type = analyze_expression(val, features, tdt, symbols, None, errors);
+            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
 
             if let Type::Array(_, val_dims) = val_type {
                 if dim >= val_dims {
@@ -1442,7 +1453,8 @@ fn do_analyze_expression(
                 }
             }
 
-            if let Some(sym) = resolve_symbol(symbols, name, expected_type) {
+            let symbols_borrow = &symbols.borrow();
+            if let Some(sym) = resolve_symbol(symbols_borrow, name, expected_type) {
                 expr.assignable = sym.is_assignable();
                 *sym_id = sym.id;
                 return sym.val_type();
@@ -1482,11 +1494,11 @@ fn do_analyze_expression(
                 }
             }
 
-            let func_type = analyze_expression(func, features, tdt, symbols, None, errors);
+            let func_type = analyze_expression(func, features, tdt, symbols, None, expected_return, errors);
 
             if expr.val_type == Type::Unknown {
                 for param in params.iter_mut() {
-                    analyze_expression(param, features, tdt, symbols, None, errors);
+                    analyze_expression(param, features, tdt, symbols, None, expected_return, errors);
                 };
             };
 
@@ -1496,11 +1508,11 @@ fn do_analyze_expression(
                 errors.push(cannot_call!(tdt, func, expr.span));
                 return Type::Error;
             } else if typedefs.len() == 1 {
-                analyze_call_signature(&expr.span, &typedefs[0].1.params, params, features, tdt, symbols, errors);
+                analyze_call_signature(&expr.span, &typedefs[0].1.params, params, features, tdt, symbols, expected_return, errors);
                 return typedefs[0].1.return_type.clone();
             } else {
                 let param_types: Vec<_> = params.iter_mut()
-                    .map(|p| analyze_expression(p, features, tdt, symbols, None, errors))
+                    .map(|p| analyze_expression(p, features, tdt, symbols, None, expected_return, errors))
                     .collect();
                 let valid_typedefs = get_valid_call_signatures(
                     &param_types[..],
@@ -1517,6 +1529,7 @@ fn do_analyze_expression(
                         tdt,
                         symbols,
                         Some(&Type::Defined(typedefs[valid_typedefs[0]].0)),
+                        expected_return,
                         errors
                     );
                     analyze_call_signature(
@@ -1526,6 +1539,7 @@ fn do_analyze_expression(
                         features,
                         tdt,
                         symbols,
+                        expected_return,
                         errors
                     );
                     return typedefs[valid_typedefs[0]].1.return_type.clone();
@@ -1537,9 +1551,9 @@ fn do_analyze_expression(
             };
         },
         ast::ExprType::Index(ref mut val, ref mut index) => {
-            let val_type = analyze_expression(val, features, tdt, symbols, None, errors);
+            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
 
-            analyze_expression(index, features, tdt, symbols, Some(&Type::Int), errors);
+            analyze_expression(index, features, tdt, symbols, Some(&Type::Int), expected_return, errors);
             expect_convert_exact!(tdt, errors, index, &Type::Int);
 
             if let Type::Array(inner_type, dims) = val_type {
@@ -1558,11 +1572,12 @@ fn do_analyze_expression(
         ast::ExprType::Cons(ref name, ref mut params, ref mut expr_ctor_id) => {
             if expr.val_type == Type::Unknown {
                 for param in params.iter_mut() {
-                    analyze_expression(param, features, tdt, symbols, None, errors);
+                    analyze_expression(param, features, tdt, symbols, None, expected_return, errors);
                 };
             };
 
-            let ctors = if let Some(ctors) = symbols.find_ctors(name) {
+            let symbols_borrow = &symbols.borrow();
+            let ctors = if let Some(ctors) = symbols_borrow.find_ctors(name) {
                 ctors
             } else {
                 errors.push(constructor_not_defined!(name, expr.span));
@@ -1576,7 +1591,7 @@ fn do_analyze_expression(
                     _ => panic!("invalid data type")
                 };
 
-                analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, errors);
+                analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
                 *expr_ctor_id = ctor_id.1;
                 return Type::Defined(ctor_id.0);
             } else {
@@ -1589,7 +1604,7 @@ fn do_analyze_expression(
                             _ => panic!("invalid data type")
                         };
 
-                        analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, errors);
+                        analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
                         *expr_ctor_id = ctor_id.1;
                         return Type::Defined(ctor_id.0);
                     };
@@ -1612,7 +1627,7 @@ fn do_analyze_expression(
                 } else if valid_ctors.len() == 1 {
                     let (ctor, ctor_id) = valid_ctors[0];
 
-                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, errors);
+                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
                     *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 }
@@ -1632,7 +1647,7 @@ fn do_analyze_expression(
                     return Type::Error;
                 } else if valid_ctors.len() == 1 {
                     let (ctor, ctor_id) = valid_ctors[0];
-                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, errors);
+                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
                     *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 } else {
@@ -1645,7 +1660,40 @@ fn do_analyze_expression(
         ast::ExprType::Int(_) => return Type::Int,
         ast::ExprType::Real(_) => return Type::Real,
         ast::ExprType::Bool(_) => return Type::Bool,
-        ast::ExprType::Char(_) => return Type::Char
+        ast::ExprType::Char(_) => return Type::Char,
+        ast::ExprType::Block(ref mut block, ref mut result) => {
+            if expr.val_type == Type::Unknown {
+                if !features.contains_key("block_expr") {
+                    errors.push((
+                        format!("block expression support is not enabled (did you mean to add `@feature(block_expr)'?)"),
+                        expr.span
+                    ));
+                };
+
+                block.symbols.borrow_mut().set_parent(symbols.clone());
+                populate_block_symbol_table(features, tdt, block, expected_return, errors);
+            };
+
+            if let Some(result) = result {
+                return analyze_expression(
+                    result,
+                    features,
+                    tdt,
+                    &block.symbols,
+                    expected_type,
+                    expected_return,
+                    errors
+                );
+            } else if block.stmts.iter().any(|s| s.will_return) {
+                return Type::Never;
+            } else {
+                errors.push((
+                    "this block expression has no value and does not always return".to_string(),
+                    expr.span
+                ));
+                return Type::Error;
+            };
+        }
     };
 }
 
@@ -1653,15 +1701,16 @@ fn analyze_expression(
     expr: &mut ast::Expr,
     features: &HashMap<String, Span>,
     tdt: &TypeDefinitionTable,
-    symbols: &SymbolTable,
+    symbols: &Rc<RefCell<SymbolTable>>,
     expected_type: Option<&Type>,
+    expected_return: Option<&Type>,
     errors: &mut Vec<(String, Span)>
 ) -> Type {
     if expr.val_type.is_resolved() {
         return expr.val_type.clone();
     };
 
-    expr.val_type = do_analyze_expression(expr, features, tdt, symbols, expected_type, errors);
+    expr.val_type = do_analyze_expression(expr, features, tdt, symbols, expected_type, expected_return, errors);
     expr.val_type.clone()
 }
 
@@ -1691,25 +1740,27 @@ fn analyze_statement(
 ) {
     match stmt.node {
         ast::StmtType::IfThenElse(ref mut cond, ref mut then_stmt, ref mut else_stmt) => {
-            analyze_expression(cond, features, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            analyze_expression(cond, features, tdt, symbols, Some(&Type::Bool), expected_return, errors);
             expect_convert_exact!(tdt, errors, cond, &Type::Bool);
 
             analyze_statement(then_stmt, features, tdt, symbols, expected_return, errors);
 
             if let Some(else_stmt) = else_stmt {
                 analyze_statement(else_stmt, features, tdt, symbols, expected_return, errors);
+                stmt.will_return = then_stmt.will_return && else_stmt.will_return;
             } else if !features.contains_key("optional_else") {
                 errors.push(missing_else!(stmt.span));
             };
         },
         ast::StmtType::WhileDo(ref mut cond, ref mut do_stmt) => {
-            analyze_expression(cond, features, tdt, &symbols.borrow(), Some(&Type::Bool), errors);
+            analyze_expression(cond, features, tdt, symbols, Some(&Type::Bool), expected_return, errors);
             expect_convert_exact!(tdt, errors, cond, &Type::Bool);
 
             analyze_statement(do_stmt, features, tdt, symbols, expected_return, errors);
+            stmt.will_return = if let ast::ExprType::Bool(true) = cond.node { true } else { false };
         },
         ast::StmtType::Read(ref mut loc) => {
-            let val_type = analyze_expression(loc, features, tdt, &symbols.borrow(), None, errors);
+            let val_type = analyze_expression(loc, features, tdt, symbols, None, expected_return, errors);
             let is_valid = match val_type {
                 Type::Bool => true,
                 Type::Char => true,
@@ -1726,13 +1777,12 @@ fn analyze_statement(
             };
         },
         ast::StmtType::Assign(ref mut loc, ref mut val) => {
-            let symbols = symbols.borrow();
-            let expected_type = analyze_expression(loc, features, tdt, &symbols, None, errors);
-            analyze_expression(val, features, tdt, &symbols, if expected_type.is_resolved() {
+            let expected_type = analyze_expression(loc, features, tdt, symbols, None, expected_return, errors);
+            analyze_expression(val, features, tdt, symbols, if expected_type.is_resolved() {
                 Some(&expected_type)
             } else {
                 None
-            }, errors);
+            }, expected_return, errors);
 
             if !loc.assignable {
                 errors.push(cannot_assign!(loc));
@@ -1741,7 +1791,7 @@ fn analyze_statement(
             };
         },
         ast::StmtType::Print(ref mut val) => {
-            let val_type = analyze_expression(val, features, tdt, &symbols.borrow(), None, errors);
+            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
             let is_valid = match val_type {
                 Type::Bool => true,
                 Type::Char => true,
@@ -1762,7 +1812,7 @@ fn analyze_statement(
 
             populate_block_symbol_table(features, tdt, inner_block, expected_return, errors);
 
-            inner_block.symbols.borrow_mut().lift_decls(&mut symbols.borrow_mut());
+            stmt.will_return = inner_block.stmts.iter().any(|s| s.will_return);
         },
         ast::StmtType::Case(ref mut val, ref mut cases) => {
             fn analyze_case_error(
@@ -1835,7 +1885,7 @@ fn analyze_statement(
             }
 
             {
-                let val_type = analyze_expression(val, features, tdt, &symbols.borrow(), None, errors);
+                let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
                 let typedef = if let Type::Defined(ref type_id) = val_type {
                     if let TypeDefinition::Data(ref typedef) = tdt.get_definition(*type_id) {
                         Some(typedef)
@@ -1866,18 +1916,23 @@ fn analyze_statement(
                 };
             };
 
-            for case in cases {
+            for case in cases.iter_mut() {
                 analyze_statement(&mut case.branch, features, tdt, symbols, expected_return, errors);
             };
+
+            stmt.will_return = val.val_type.are_cases_exhaustive(tdt, cases)
+                && cases.iter().all(|c| c.branch.will_return);
         },
         ast::StmtType::Return(ref mut val) => {
-            analyze_expression(val, features, tdt, &symbols.borrow(), expected_return, errors);
+            analyze_expression(val, features, tdt, symbols, expected_return, expected_return, errors);
 
             if let Some(expected_return) = expected_return {
                 expect_convert_exact!(tdt, errors, val, expected_return);
             } else {
                 errors.push(cannot_return_outside_func!(stmt.span));
             };
+
+            stmt.will_return = true;
         }
     };
 }
@@ -1915,16 +1970,14 @@ fn populate_block_symbol_table(
     };
 
     {
-        let symbols = &block.symbols.borrow();
-
-        for (_, sym) in &symbols.symbols {
+        for (_, sym) in &block.symbols.borrow().symbols {
             match sym.node {
                 SymbolType::Fun(ref fs) => {
                     populate_function_symbol_table(features, tdt, &block.symbols, &fs, &sym.span, errors);
                 },
                 SymbolType::Var(ref vs) => {
                     for d in vs.dims.borrow_mut().iter_mut() {
-                        analyze_expression(d, features, tdt, symbols, Some(&Type::Int), errors);
+                        analyze_expression(d, features, tdt, &block.symbols, Some(&Type::Int), expected_return, errors);
                         expect_convert_exact!(tdt, errors, d, &Type::Int);
                     };
                 },
@@ -1964,7 +2017,7 @@ fn populate_function_symbol_table(
     );
 
     if features.contains_key("return_anywhere") {
-        if !block.stmts.iter().any(|s| s.will_return(tdt)) {
+        if !block.stmts.iter().any(|s| s.will_return) {
             errors.push(missing_return_anywhere!(*span));
         };
     } else {

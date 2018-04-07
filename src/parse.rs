@@ -33,6 +33,11 @@ parser! {
         decls[ds] Begin stmts[ss] End => Block::new(ds, ss)
     }
 
+    maybe_expr: Option<Expr> {
+        => None,
+        expr[e] => Some(e)
+    }
+
     id_with_span: (String, Span) {
         Id(id) => (id, span!())
     }
@@ -127,8 +132,8 @@ parser! {
         #[no_reduce(Else)]
         If expr[cond] Then stmt[then_stmt] => Stmt::if_then(cond, then_stmt).at(span!()),
         While expr[cond] Do stmt[do_stmt] => Stmt::while_do(cond, do_stmt).at(span!()),
-        Read loc[l] => Stmt::read(l).at(span!()),
-        loc[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),
+        Read expr[l] => Stmt::read(l).at(span!()),
+        expr[l] Assign expr[e] => Stmt::assign(l, e).at(span!()),
         Print expr[val] => Stmt::print(val).at(span!()),
         CLPar block[b] CRPar => Stmt::block(b).at(span!()),
         Case expr[e] Of CLPar cases_stmt[cs] CRPar => Stmt::case(e, cs).at(span!()),
@@ -141,11 +146,6 @@ parser! {
             ss.push(s);
             ss
         }
-    }
-
-    loc: Expr {
-        Id(id) => Expr::identifier(id).at(span!()),
-        loc[l] SLPar expr[e] SRPar => Expr::index(l, e).at(span!())
     }
 
     case_stmt: Case<Stmt> {
@@ -224,7 +224,11 @@ parser! {
         RVal(f) => Expr::real(f).at(span!()),
         BVal(b) => Expr::bool(b).at(span!()),
         CVal(c) => Expr::char(c).at(span!()),
-        Sub int_factor[f] => Expr::negate(f).at(span!())
+        Sub int_factor[f] => Expr::negate(f).at(span!()),
+        LPar CLPar decls[ds] stmts[ss] maybe_expr[e] CRPar RPar => Expr::block(
+            Block::new(ds, ss),
+            e
+        ).at(span!()),
     }
 
     arg_list: Vec<Expr> {
