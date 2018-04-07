@@ -777,9 +777,7 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct TypeDefinitionTable {
-    #[deprecated]
-    pub defs: Vec<TypeDefinition>,
-    _defs: UnsafeCell<Vec<Option<Box<TypeDefinition>>>>
+    defs: UnsafeCell<Vec<Option<Box<TypeDefinition>>>>
 }
 
 pub struct TypeDefinitionTableIter<'a>(&'a TypeDefinitionTable, usize);
@@ -789,7 +787,7 @@ impl <'a> Iterator for TypeDefinitionTableIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let TypeDefinitionTableIter(tdt, ref mut id) = *self;
-        let defs = unsafe { &*tdt._defs.get() };
+        let defs = unsafe { &*tdt.defs.get() };
 
         loop {
             if *id >= defs.len() {
@@ -807,27 +805,26 @@ impl <'a> Iterator for TypeDefinitionTableIter<'a> {
 impl TypeDefinitionTable {
     pub fn new() -> TypeDefinitionTable {
         TypeDefinitionTable {
-            defs: Vec::new(),
-            _defs: UnsafeCell::new(Vec::new())
+            defs: UnsafeCell::new(Vec::new())
         }
     }
 
     pub fn add_dummy_definition(&self) -> usize {
-        let defs = unsafe { &mut *self._defs.get() };
+        let defs = unsafe { &mut *self.defs.get() };
 
         defs.push(None);
         defs.len() - 1
     }
 
     pub fn add_definition(&self, def: TypeDefinition) -> usize {
-        let defs = unsafe { &mut *self._defs.get() };
+        let defs = unsafe { &mut *self.defs.get() };
 
         defs.push(Some(Box::new(def)));
         defs.len() - 1
     }
 
     pub fn define_type(&self, id: usize, def: TypeDefinition) -> () {
-        let defs = unsafe { &mut *self._defs.get() };
+        let defs = unsafe { &mut *self.defs.get() };
 
         if defs[id].is_some() {
             panic!("cannot redefine type more than once");
@@ -837,13 +834,13 @@ impl TypeDefinitionTable {
     }
 
     pub fn get_definition(&self, id: usize) -> &TypeDefinition {
-        let defs = unsafe { &*self._defs.get() };
+        let defs = unsafe { &*self.defs.get() };
 
         unsafe { &*(defs[id].as_ref().unwrap().as_ref() as *const TypeDefinition) }
     }
 
     pub fn get_function_type(&self, params: &[Type], return_type: &Type) -> usize {
-        for (id, type_def) in unsafe { &*self._defs.get() }.iter().enumerate() {
+        for (id, type_def) in unsafe { &*self.defs.get() }.iter().enumerate() {
             if let Some(box TypeDefinition::Function(fd)) = type_def {
                 if &fd.params[..] == params && &fd.return_type == return_type {
                     return id;
