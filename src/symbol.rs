@@ -288,7 +288,12 @@ impl SymbolDefinitionTable {
         id
     }
 
-    pub fn add_named_function_symbol(&self, st: &mut SymbolTable, mut s: Symbol) -> usize {
+    pub fn add_named_function_symbol<T: Iterator<Item=Symbol>>(
+        &self,
+        st: &mut SymbolTable,
+        mut s: Symbol,
+        args: T
+    ) -> usize {
         let symbols = unsafe { &mut *self.symbols.get() };
         let mut id = symbols.len();
         let sig = if let SymbolType::Fun(ref s) = s.node {
@@ -323,6 +328,23 @@ impl SymbolDefinitionTable {
 
         s.id = id;
         symbols.push(Box::new(s));
+
+        let args: Vec<_> = {
+            let body = if let SymbolType::Fun(ref mut f) = symbols[id].node {
+                f.body.borrow()
+            } else {
+                unreachable!();
+            };
+            let fst = &mut body.symbols.borrow_mut();
+            args.map(|mut a| {
+                a.defining_fun = id;
+                self.add_named_symbol(fst, a)
+            }).collect()
+        };
+
+        if let SymbolType::Fun(ref mut f) = symbols[id].node {
+            f.params = args;
+        };
 
         id
     }

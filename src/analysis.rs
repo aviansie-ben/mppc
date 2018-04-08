@@ -470,18 +470,15 @@ fn create_symbol_for_decl(
                 true
             };
 
-            let params: Vec<_> = {
-                let mut fn_symbols = &mut body.symbols.borrow_mut();
-                sig.params.into_iter().map(|p| ctx.sdt.add_named_symbol(fn_symbols, Symbol::new(
-                    0,
-                    p.id,
-                    p.span,
-                    SymbolType::Param(ParamSymbol {
-                        val_type: resolve_type(&p.val_type, ctx, symbols)
-                    }),
-                    ctx.function_id
-                ))).collect()
-            };
+            let params: Vec<_> = sig.params.into_iter().map(|p| Symbol::new(
+                0,
+                p.id,
+                p.span,
+                SymbolType::Param(ParamSymbol {
+                    val_type: resolve_type(&p.val_type, ctx, symbols)
+                }),
+                ctx.function_id
+            )).collect();
 
             if define {
                 ctx.sdt.add_named_function_symbol(symbols, Symbol::new(
@@ -490,11 +487,11 @@ fn create_symbol_for_decl(
                     decl.span,
                     SymbolType::Fun(FunSymbol {
                         sig: fn_type,
-                        params: params,
+                        params: vec![],
                         body: RefCell::new(body)
                     }),
                     ctx.function_id
-                ));
+                ), params.into_iter());
             };
         },
         ast::DeclType::Var(spec, val_type) => {
