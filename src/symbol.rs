@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -148,9 +148,7 @@ pub struct SymbolTable {
     pub symbol_names: HashMap<String, usize>,
     pub type_names: HashMap<String, (usize, Span)>,
     pub ctor_names: HashMap<String, Vec<(usize, usize)>>,
-    pub symbols: HashMap<usize, Symbol>,
-    pub parent: Option<Rc<RefCell<SymbolTable>>>,
-    next_id: Rc<Cell<usize>>
+    pub parent: Option<Rc<RefCell<SymbolTable>>>
 }
 
 impl SymbolTable {
@@ -159,96 +157,16 @@ impl SymbolTable {
             symbol_names: HashMap::new(),
             type_names: HashMap::new(),
             ctor_names: HashMap::new(),
-            symbols: HashMap::new(),
-            parent: None,
-            next_id: Rc::new(Cell::new(0))
+            parent: None
         }
     }
 
     pub fn set_parent(&mut self, parent: Rc<RefCell<SymbolTable>>) -> () {
-        assert!(self.next_id.get() == 0);
-
-        self.next_id = parent.borrow().next_id.clone();
         self.parent = Some(parent);
     }
 
-    pub fn alloc_symbol_id(&mut self) -> usize {
-        let id = self.next_id.get();
-        self.next_id.set(id + 1);
-        id
-    }
-
-    pub fn add_symbol(&mut self, mut s: Symbol) -> usize {
-        s.id = self.alloc_symbol_id();
-        self.add_symbol_with_id(s)
-    }
-
-    pub fn add_symbol_with_id(&mut self, s: Symbol) -> usize {
-        let id = s.id;
-
-        self.symbol_names.insert(s.name.clone(), id);
-        self.symbols.insert(id, s);
-
-        id
-    }
-
-    pub fn add_unnamed_symbol(&mut self, mut s: Symbol) -> usize {
-        s.id = self.alloc_symbol_id();
-        self.add_unnamed_symbol_with_id(s)
-    }
-
-    pub fn add_unnamed_symbol_with_id(&mut self, s: Symbol) -> usize {
-        let id = s.id;
-
-        self.symbols.insert(id, s);
-
-        id
-    }
-
-    pub fn add_function_symbol(&mut self, mut s: Symbol) -> usize {
-        s.id = self.alloc_symbol_id();
-        self.add_function_symbol_with_id(s)
-    }
-
-    pub fn add_function_symbol_with_id(&mut self, s: Symbol) -> usize {
-        let id = s.id;
-        let name = s.name.clone();
-        let sig = if let SymbolType::Fun(ref s) = s.node {
-            s.sig
-        } else {
-            unreachable!();
-        };
-
-        self.symbols.insert(id, s);
-
-        let old_sym = match self.find_imm_named_symbol(&name) {
-            Some(sym) => {
-                match sym.node {
-                    SymbolType::MultiFun(ref mf) => {
-                        mf.funcs.borrow_mut().push((sig, id));
-                        return id;
-                    },
-                    SymbolType::Fun(ref f) => Some((f.sig, sym.id)),
-                    _ => unreachable!()
-                }
-            },
-            None => None
-        };
-
-        if let Some((old_sig, old_id)) = old_sym {
-            self.add_symbol(Symbol {
-                id: 0,
-                name: name,
-                span: Span::dummy(),
-                node: SymbolType::MultiFun(MultiFunSymbol {
-                    funcs: RefCell::new(vec![(old_sig, old_id), (sig, id)])
-                })
-            });
-        } else {
-            self.symbol_names.insert(name, id);
-        };
-
-        id
+    pub fn add_symbol(&mut self, name: String, id: usize) -> () {
+        self.symbol_names.insert(name, id);
     }
 
     pub fn add_type(&mut self, name: String, id: usize, span: Span) -> () {
@@ -276,35 +194,19 @@ impl SymbolTable {
         self.ctor_names.insert(name, ctors);
     }
 
-    pub fn find_symbol(&self, id: usize) -> Option<ChainRef<Symbol>> {
-        if let Some(sym) = self.symbols.get(&id) {
-            Some(ChainRef::new(sym))
-        } else if let Some(ref parent) = self.parent {
-            ChainRef::and_then_one_option(
-                parent.borrow(),
-                |p| p.find_symbol(id)
-            )
+    pub fn find_imm_named_symbol(&self, name: &str) -> Option<usize> {
+        if let Some(sym_id) = self.symbol_names.get(name).map(|id| *id) {
+            Some(sym_id)
         } else {
             None
         }
     }
 
-    pub fn find_imm_named_symbol(&self, name: &str) -> Option<ChainRef<Symbol>> {
+    pub fn find_named_symbol(&self, name: &str) -> Option<usize> {
         if let Some(sym_id) = self.symbol_names.get(name).map(|id| *id) {
-            self.find_symbol(sym_id)
-        } else {
-            None
-        }
-    }
-
-    pub fn find_named_symbol(&self, name: &str) -> Option<ChainRef<Symbol>> {
-        if let Some(sym_id) = self.symbol_names.get(name).map(|id| *id) {
-            self.find_symbol(sym_id)
+            Some(sym_id)
         } else if let Some(ref parent) = self.parent {
-            ChainRef::and_then_one_option(
-                parent.borrow(),
-                |p| p.find_named_symbol(name)
-            )
+            parent.borrow().find_named_symbol(name)
         } else {
             None
         }
@@ -336,11 +238,110 @@ impl SymbolTable {
             None
         }
     }
+}
 
-    pub fn lift_decls(&mut self, target: &mut SymbolTable) {
-        for (id, sym) in mem::replace(&mut self.symbols, HashMap::new()) {
-            target.symbols.insert(id, sym);
+#[derive(Debug)]
+pub struct SymbolDefinitionTable {
+    symbols: UnsafeCell<Vec<Box<Symbol>>>
+}
+
+impl SymbolDefinitionTable {
+    pub fn new() -> SymbolDefinitionTable {
+        SymbolDefinitionTable {
+            symbols: UnsafeCell::new(Vec::new())
+        }
+    }
+
+    pub fn add_symbol(&self, mut s: Symbol) -> usize {
+        let symbols = unsafe { &mut *self.symbols.get() };
+        let id = symbols.len();
+
+        s.id = id;
+        symbols.push(Box::new(s));
+        id
+    }
+
+    pub fn add_named_symbol(&self, st: &mut SymbolTable, s: Symbol) -> usize {
+        let name = s.name.clone();
+        let id = self.add_symbol(s);
+
+        st.symbol_names.insert(name, id);
+        id
+    }
+
+    pub fn add_named_function_symbol(&self, st: &mut SymbolTable, mut s: Symbol) -> usize {
+        let symbols = unsafe { &mut *self.symbols.get() };
+        let mut id = symbols.len();
+        let sig = if let SymbolType::Fun(ref s) = s.node {
+            s.sig
+        } else {
+            unreachable!()
         };
+
+        if let Some(old_sym) = st.find_imm_named_symbol(&s.name) {
+            match unsafe { &*(symbols[old_sym].as_ref() as *const Symbol) }.node {
+                SymbolType::MultiFun(ref mf) => {
+                    mf.funcs.borrow_mut().push((sig, id));
+                },
+                SymbolType::Fun(ref f) => {
+                    symbols.push(Box::new(Symbol {
+                        id: id,
+                        name: s.name.clone(),
+                        span: Span::dummy(),
+                        node: SymbolType::MultiFun(MultiFunSymbol {
+                            funcs: RefCell::new(vec![(f.sig, old_sym), (sig, id + 1)])
+                        })
+                    }));
+                    st.symbol_names.insert(s.name.clone(), id);
+                    id = id + 1
+                },
+                _ => unreachable!()
+            };
+        } else {
+            st.symbol_names.insert(s.name.clone(), id);
+        };
+
+        s.id = id;
+        symbols.push(Box::new(s));
+
+        id
+    }
+
+    pub fn get_symbol(&self, id: usize) -> &Symbol {
+        let symbols = unsafe { &*self.symbols.get() };
+
+        unsafe { &*(symbols[id].as_ref() as *const Symbol) }
+    }
+
+    pub fn iter<'a>(&'a self) -> SymbolDefinitionTableIter<'a> {
+        SymbolDefinitionTableIter(self, 0)
+    }
+}
+
+pub struct SymbolDefinitionTableIter<'a>(&'a SymbolDefinitionTable, usize);
+
+impl <'a> Iterator for SymbolDefinitionTableIter<'a> {
+    type Item = (usize, &'a Symbol);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let SymbolDefinitionTableIter(sdt, ref mut id) = *self;
+        let symbols = unsafe { &*sdt.symbols.get() };
+
+        if *id >= symbols.len() {
+            return None;
+        } else {
+            *id = *id + 1;
+            return Some((*id, unsafe { &*(symbols[*id - 1].as_ref() as *const Symbol) }));
+        }
+    }
+}
+
+impl <'a> IntoIterator for &'a SymbolDefinitionTable {
+    type Item = (usize, &'a Symbol);
+    type IntoIter = SymbolDefinitionTableIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

@@ -11,12 +11,18 @@ use util::{DeferredDisplay, PrettyDisplay};
 pub struct Program {
     pub block: Block,
     pub features: HashMap<String, Span>,
+    pub symbols: symbol::SymbolDefinitionTable,
     pub types: symbol::TypeDefinitionTable
 }
 
 impl Program {
     pub fn new(block: Block, features: HashMap<String, Span>) -> Program {
-        Program { block: block, features: features, types: symbol::TypeDefinitionTable::new() }
+        Program {
+            block: block,
+            features: features,
+            symbols: symbol::SymbolDefinitionTable::new(),
+            types: symbol::TypeDefinitionTable::new()
+        }
     }
 }
 
@@ -27,10 +33,14 @@ impl PrettyDisplay for Program {
 
         for (feature, _) in &self.features {
             write!(f, "{}Feature {}\n", indent, feature)?;
-        }
+        };
 
         for (id, td) in &self.types {
             write!(f, "{}TypeDef {}\n{}\n", indent, id, td.pretty_indented(&next_indent))?;
+        };
+
+        for (_, sym) in &self.symbols {
+            write!(f, "{}\n", sym.pretty_indented(indent))?;
         };
 
         write!(f, "{}", self.block.pretty_indented(indent))?;
@@ -73,16 +83,8 @@ impl PrettyDisplay for Block {
                 write!(f, "\n{}TypeRef {} {}", next_indent, name, id)?;
             };
 
-            for (_, sym_id) in &symbols.symbol_names {
-                let sym = symbols.find_symbol(*sym_id).unwrap();
-                write!(f, "\n{}", sym.pretty_indented(&next_indent))?;
-
-                if let symbol::SymbolType::MultiFun(ref sym) = sym.node {
-                    for (_, sym_id) in sym.funcs.borrow().iter() {
-                        let sym = symbols.find_symbol(*sym_id).unwrap();
-                        write!(f, "\n{}", sym.pretty_indented(&next_next_indent))?;
-                    };
-                };
+            for (name, id) in &symbols.symbol_names {
+                write!(f, "\n{}SymRef {} {}", next_indent, name, id)?;
             };
         };
 
