@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::mem;
 
-use il::{BasicBlock, FlowGraph, IlConst, IlRegister, IlOperand, IlInstruction};
+use il::{BasicBlock, FlowGraph, IlRegister, IlOperand, IlInstruction, Program};
 use util;
 
 fn precompute_liveness(
@@ -220,7 +220,7 @@ fn do_dead_store_elimination(
     num_eliminated
 }
 
-fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlConst)> {
+fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlOperand)> {
     use il::IlConst::*;
     use il::IlInstruction::*;
     use il::IlOperand::*;
@@ -228,11 +228,32 @@ fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlConst)>
     // If the value of this instruction can be calculated, do so. Note that division by 0 is special
     // cased since it causes a runtime error when attempted.
     match *instr {
-        Add(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Int(r + l))),
-        Sub(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Int(r - l))),
-        Mul(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Int(r * l))),
-        Div(_, Const(Int(_)), Const(Int(0))) => None,
-        Div(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Int(r / l))),
+        AddInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int(r + l)))),
+        AddInt(reg, Register(r), Const(Int(0))) => Some((reg, Register(r))),
+        AddInt(reg, Const(Int(0)), Register(l)) => Some((reg, Register(l))),
+        SubInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int(r - l)))),
+        SubInt(reg, Register(r), Const(Int(0))) => Some((reg, Register(r))),
+        SubInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(0)))),
+        MulInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int(r * l)))),
+        MulInt(reg, Register(_), Const(Int(0))) => Some((reg, Const(Int(0)))),
+        MulInt(reg, Const(Int(0)), Register(_)) => Some((reg, Const(Int(0)))),
+        MulInt(reg, Register(r), Const(Int(1))) => Some((reg, Register(r))),
+        MulInt(reg, Const(Int(1)), Register(l)) => Some((reg, Register(l))),
+        DivInt(_, _, Const(Int(0))) => None,
+        DivInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int(r / l)))),
+        DivInt(reg, Register(r), Const(Int(1))) => Some((reg, Register(r))),
+        DivInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
+        LogicNotInt(reg, Const(Int(r))) => Some((reg, Const(Int((r == 0) as i32)))),
+        EqInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r == l) as i32)))),
+        EqInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
+        LtInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r < l) as i32)))),
+        LtInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(0)))),
+        GtInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r > l) as i32)))),
+        GtInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(0)))),
+        LeInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r <= l) as i32)))),
+        LeInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
+        GeInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r >= l) as i32)))),
+        GeInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
         _ => None
     }
 }
@@ -277,8 +298,8 @@ fn do_constant_fold(
             // substituted for uses of the target register later. Otherwise, mark the value of the
             // target register as being unknown at this point in the basic block.
             if let Some((r, c)) = try_fold_constant(i) {
-                mem::replace(i, Copy(r, Const(c)));
-                assigns.insert(r, Some(Const(c)));
+                mem::replace(i, Copy(r, c));
+                assigns.insert(r, Some(c));
             } else if let Copy(r, v) = *i {
                 assigns.insert(r, Some(v));
             } else if let Some(r) = i.target_register() {
@@ -621,7 +642,7 @@ fn do_empty_block_elision(
     empty_blocks.len()
 }
 
-pub fn optimize_il(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&'static str>) {
+fn optimize_function(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&'static str>) {
     if optimizations.len() == 0 {
         return;
     }
@@ -634,24 +655,28 @@ pub fn optimize_il(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&'s
 
         if optimizations.contains("const") {
             do_propagation(g, w);
-        }
+        };
 
         if optimizations.contains("dead-store") {
             let l = build_liveness_graph(g, w);
             updated = do_dead_store_elimination(g, w, &l) != 0 || updated;
-        }
+        };
 
         if optimizations.contains("dead-code") {
             updated = do_empty_block_elision(g, w) != 0 || updated;
             updated = do_dead_jump_elimination(g, w) != 0 || updated;
             do_dead_block_elimination(g, w);
-        }
+        };
 
         writeln!(w, "========== CURRENT IL ==========").unwrap();
         writeln!(w, "{}", g).unwrap();
 
         if !updated {
             break;
-        }
+        };
     }
+}
+
+pub fn optimize_il(program: &mut Program, w: &mut Write, optimizations: &HashSet<&'static str>) {
+    optimize_function(&mut program.main_block, w, optimizations);
 }

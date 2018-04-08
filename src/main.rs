@@ -17,6 +17,7 @@ pub mod analysis;
 pub mod ast;
 pub mod codegen;
 pub mod il;
+pub mod ilgen;
 #[macro_use] pub mod lex;
 pub mod optimize;
 pub mod parse;
@@ -283,9 +284,9 @@ fn compile_stack_command<'a>(args: &ArgMatches<'a>) {
     print_errors(&mut errors);
 
     if errors.is_empty() {
-        let mut g = il::generate_il(parse_result.as_ref().unwrap(), debug_output.as_mut());
+        let mut p = ilgen::generate_il(parse_result.as_ref().unwrap(), debug_output.as_mut());
 
-        optimize::optimize_il(&mut g, debug_output.as_mut(), &get_optimizations(args));
+        optimize::optimize_il(&mut p, debug_output.as_mut(), &get_optimizations(args));
 
         // TODO Stack codegen
     }
@@ -313,25 +314,27 @@ fn compile_il_command<'a>(args: &ArgMatches<'a>) {
 
     let mut tokens = create_lexer(&mut input);
     let mut errors: Vec<(String, lex::Span)> = Vec::new();
-    let parse_result = parse::parse_program(&mut tokens);
+    let mut parse_result = parse::parse_program(&mut tokens);
 
-    match &parse_result {
-        &Result::Err(ref err) => {
+    match parse_result {
+        Result::Err(ref err) => {
             errors.push(err.clone());
             tokens.drain_tokens();
         },
-        &Result::Ok(_) => {}
+        Result::Ok(ref mut program) => {
+            analysis::populate_symbol_tables(program, &mut errors);
+        }
     }
 
     tokens.finish(&mut errors);
     print_errors(&mut errors);
 
     if errors.is_empty() {
-        let mut g = il::generate_il(parse_result.as_ref().unwrap(), debug_output.as_mut());
+        let mut p = ilgen::generate_il(parse_result.as_ref().unwrap(), debug_output.as_mut());
 
-        optimize::optimize_il(&mut g, debug_output.as_mut(), &get_optimizations(args));
+        optimize::optimize_il(&mut p, debug_output.as_mut(), &get_optimizations(args));
 
-        println!("{}", g);
+        println!("{}", p);
     }
 }
 

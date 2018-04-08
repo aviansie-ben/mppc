@@ -1,30 +1,86 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
-use std::io::Write;
 use std::mem;
 
-use ast;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IlFloat(pub u64);
+
+impl IlFloat {
+    pub fn as_f64(&self) -> f64 {
+        unsafe { mem::transmute::<u64, f64>(self.0) }
+    }
+
+    pub fn from_f64(val: f64) -> IlFloat {
+        IlFloat(unsafe { mem::transmute::<f64, u64>(val) })
+    }
+}
+
+impl fmt::Display for IlFloat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_f64())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IlType {
+    Int,
+    Float,
+    Addr
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IlConst {
-    Int(i32)
+    Int(i32),
+    Float(IlFloat),
+    AddrSym(usize, u64),
+    Addr(u64)
+}
+
+impl IlConst {
+    pub fn get_type(&self) -> IlType {
+        use il::IlConst::*;
+        match *self {
+            Int(_) => IlType::Int,
+            Float(_) => IlType::Float,
+            AddrSym(_, _) => IlType::Addr,
+            Addr(_) => IlType::Addr
+        }
+    }
 }
 
 impl fmt::Display for IlConst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use il::IlConst::*;
         match *self {
-            Int(v) => write!(f, "i32:{}", v)
+            Int(v) => write!(f, "i32:{}", v),
+            Float(v) => write!(f, "f64:{}", v),
+            AddrSym(id, off) => if off == 0 {
+                write!(f, "a:${}", id)
+            } else {
+                write!(f, "a:${}+{}", id, off)
+            },
+            Addr(v) => write!(f, "a:{}", v)
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IlRegister(pub u32);
+pub struct IlRegister(u32, IlType);
+
+impl IlRegister {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+
+    pub fn reg_type(&self) -> IlType {
+        self.1
+    }
+}
 
 impl fmt::Display for IlRegister {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let IlRegister(n) = self;
+        let IlRegister(n, _) = self;
         write!(f, "${}", n)
     }
 }
@@ -47,20 +103,29 @@ impl fmt::Display for IlOperand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IlInstruction {
-    Input(IlRegister),
-    TapeWrite(IlOperand, IlOperand),
-    Write(IlOperand),
-
     JumpNonZero(IlOperand, u32),
     JumpZero(IlOperand, u32),
 
     Copy(IlRegister, IlOperand),
-    Add(IlRegister, IlOperand, IlOperand),
-    Sub(IlRegister, IlOperand, IlOperand),
-    Mul(IlRegister, IlOperand, IlOperand),
-    Div(IlRegister, IlOperand, IlOperand),
+    AddInt(IlRegister, IlOperand, IlOperand),
+    SubInt(IlRegister, IlOperand, IlOperand),
+    MulInt(IlRegister, IlOperand, IlOperand),
+    DivInt(IlRegister, IlOperand, IlOperand),
+    LogicNotInt(IlRegister, IlOperand),
 
-    TapeRead(IlRegister, IlOperand),
+    EqInt(IlRegister, IlOperand, IlOperand),
+    LtInt(IlRegister, IlOperand, IlOperand),
+    GtInt(IlRegister, IlOperand, IlOperand),
+    LeInt(IlRegister, IlOperand, IlOperand),
+    GeInt(IlRegister, IlOperand, IlOperand),
+
+    PrintInt(IlOperand),
+    PrintBool(IlOperand),
+    PrintChar(IlOperand),
+
+    ReadInt(IlRegister),
+    ReadBool(IlRegister),
+    ReadChar(IlRegister),
 
     Nop
 }
@@ -87,32 +152,52 @@ impl IlInstruction {
     pub fn mutate_operands<TFn>(&mut self, mut f: TFn) where TFn: FnMut (&mut IlOperand) -> () {
         use il::IlInstruction::*;
         match *self {
-            Input(_) => {},
-            TapeWrite(ref mut o1, ref mut o2) => {
-                f(o1);
-                f(o2);
-            },
-            Write(ref mut o) => f(o),
             JumpNonZero(ref mut o, _) => f(o),
             JumpZero(ref mut o, _) => f(o),
             Copy(_, ref mut o) => f(o),
-            Add(_, ref mut o1, ref mut o2) => {
+            AddInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
             },
-            Sub(_, ref mut o1, ref mut o2) => {
+            SubInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
             },
-            Mul(_, ref mut o1, ref mut o2) => {
+            MulInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
             },
-            Div(_, ref mut o1, ref mut o2) => {
+            DivInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
             },
-            TapeRead(_, ref mut o) => f(o),
+            LogicNotInt(_, ref mut o) => f(o),
+            EqInt(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            LtInt(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            GtInt(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            LeInt(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            GeInt(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            PrintInt(ref mut o) => f(o),
+            PrintBool(ref mut o) => f(o),
+            PrintChar(ref mut o) => f(o),
+            ReadInt(_) => {},
+            ReadBool(_) => {},
+            ReadChar(_) => {},
             Nop => {}
         }
     }
@@ -120,32 +205,52 @@ impl IlInstruction {
     pub fn for_operands<TFn>(&self, mut f: TFn) where TFn: FnMut (&IlOperand) -> () {
         use il::IlInstruction::*;
         match *self {
-            Input(_) => {},
-            TapeWrite(ref o1, ref o2) => {
-                f(o1);
-                f(o2);
-            },
-            Write(ref o) => f(o),
             JumpNonZero(ref o, _) => f(o),
             JumpZero(ref o, _) => f(o),
             Copy(_, ref o) => f(o),
-            Add(_, ref o1, ref o2) => {
+            AddInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
             },
-            Sub(_, ref o1, ref o2) => {
+            SubInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
             },
-            Mul(_, ref o1, ref o2) => {
+            MulInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
             },
-            Div(_, ref o1, ref o2) => {
+            DivInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
             },
-            TapeRead(_, ref o) => f(o),
+            LogicNotInt(_, ref o) => f(o),
+            EqInt(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            LtInt(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            GtInt(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            LeInt(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            GeInt(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            PrintInt(ref o) => f(o),
+            PrintBool(ref o) => f(o),
+            PrintChar(ref o) => f(o),
+            ReadInt(_) => {},
+            ReadBool(_) => {},
+            ReadChar(_) => {},
             Nop => {}
         }
     }
@@ -153,17 +258,25 @@ impl IlInstruction {
     pub fn target_register(&self) -> Option<IlRegister> {
         use il::IlInstruction::*;
         match *self {
-            Input(r) => Some(r),
-            TapeWrite(_, _) => None,
-            Write(_) => None,
             JumpNonZero(_, _) => None,
             JumpZero(_, _) => None,
             Copy(r, _) => Some(r),
-            Add(r, _, _) => Some(r),
-            Sub(r, _, _) => Some(r),
-            Mul(r, _, _) => Some(r),
-            Div(r, _, _) => Some(r),
-            TapeRead(r, _) => Some(r),
+            AddInt(r, _, _) => Some(r),
+            SubInt(r, _, _) => Some(r),
+            MulInt(r, _, _) => Some(r),
+            DivInt(r, _, _) => Some(r),
+            LogicNotInt(r, _) => Some(r),
+            EqInt(r, _, _) => Some(r),
+            LtInt(r, _, _) => Some(r),
+            GtInt(r, _, _) => Some(r),
+            LeInt(r, _, _) => Some(r),
+            GeInt(r, _, _) => Some(r),
+            PrintInt(_) => None,
+            PrintBool(_) => None,
+            PrintChar(_) => None,
+            ReadInt(r) => Some(r),
+            ReadBool(r) => Some(r),
+            ReadChar(r) => Some(r),
             Nop => None
         }
     }
@@ -171,13 +284,20 @@ impl IlInstruction {
     pub fn relink_target(&mut self, target: IlRegister) {
         use il::IlInstruction::*;
         match *self {
-            Input(ref mut old_target) => mem::replace(old_target, target),
             Copy(ref mut old_target, _) => mem::replace(old_target, target),
-            Add(ref mut old_target, _, _) => mem::replace(old_target, target),
-            Sub(ref mut old_target, _, _) => mem::replace(old_target, target),
-            Mul(ref mut old_target, _, _) => mem::replace(old_target, target),
-            Div(ref mut old_target, _, _) => mem::replace(old_target, target),
-            TapeRead(ref mut old_target, _) => mem::replace(old_target, target),
+            AddInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            SubInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            MulInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            DivInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            LogicNotInt(ref mut old_target, _) => mem::replace(old_target, target),
+            EqInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            LtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            GtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            LeInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            GeInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            ReadInt(ref mut old_target) => mem::replace(old_target, target),
+            ReadBool(ref mut old_target) => mem::replace(old_target, target),
+            ReadChar(ref mut old_target) => mem::replace(old_target, target),
             _ => panic!("Attempt to relink target register of non-writing instruction {}", self)
         };
     }
@@ -185,18 +305,15 @@ impl IlInstruction {
     pub fn has_side_effect(&self) -> bool {
         use il::IlInstruction::*;
         match *self {
-            Input(_) => true,
-            TapeWrite(_, _) => true,
-            Write(_) => true,
             JumpNonZero(_, _) => true,
             JumpZero(_, _) => true,
-            Copy(_, _) => false,
-            Add(_, _, _) => false,
-            Sub(_, _, _) => false,
-            Mul(_, _, _) => false,
-            Div(_, _, _) => false,
-            TapeRead(_, _) => false,
-            Nop => false
+            PrintInt(_) => true,
+            PrintBool(_) => true,
+            PrintChar(_) => true,
+            ReadInt(_) => true,
+            ReadBool(_) => true,
+            ReadChar(_) => true,
+            _ => false
         }
     }
 }
@@ -205,17 +322,25 @@ impl fmt::Display for IlInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use il::IlInstruction::*;
         match *self {
-            Input(ref reg) => write!(f, "input {}", reg),
-            TapeWrite(ref addr, ref val) => write!(f, "tape_write {} {}", addr, val),
-            Write(ref val) => write!(f, "write {}", val),
             JumpNonZero(ref cond, ref target) => write!(f, "jnz {} @{}", cond, target),
             JumpZero(ref cond, ref target) => write!(f, "jz {} @{}", cond, target),
             Copy(ref reg, ref val) => write!(f, "copy {} {}", reg, val),
-            Add(ref reg, ref lhs, ref rhs) => write!(f, "add {} {} {}", reg, lhs, rhs),
-            Sub(ref reg, ref lhs, ref rhs) => write!(f, "sub {} {} {}", reg, lhs, rhs),
-            Mul(ref reg, ref lhs, ref rhs) => write!(f, "mul {} {} {}", reg, lhs, rhs),
-            Div(ref reg, ref lhs, ref rhs) => write!(f, "div {} {} {}", reg, lhs, rhs),
-            TapeRead(ref reg, ref addr) => write!(f, "tape_read {} {}", reg, addr),
+            AddInt(ref reg, ref lhs, ref rhs) => write!(f, "add.i32 {} {} {}", reg, lhs, rhs),
+            SubInt(ref reg, ref lhs, ref rhs) => write!(f, "sub.i32 {} {} {}", reg, lhs, rhs),
+            MulInt(ref reg, ref lhs, ref rhs) => write!(f, "mul.i32 {} {} {}", reg, lhs, rhs),
+            DivInt(ref reg, ref lhs, ref rhs) => write!(f, "div.i32 {} {} {}", reg, lhs, rhs),
+            LogicNotInt(ref reg, ref val) => write!(f, "lnot.i32 {} {}", reg, val),
+            EqInt(ref reg, ref lhs, ref rhs) => write!(f, "eq.i32 {} {} {}", reg, lhs, rhs),
+            LtInt(ref reg, ref lhs, ref rhs) => write!(f, "lt.i32 {} {} {}", reg, lhs, rhs),
+            GtInt(ref reg, ref lhs, ref rhs) => write!(f, "gt.i32 {} {} {}", reg, lhs, rhs),
+            LeInt(ref reg, ref lhs, ref rhs) => write!(f, "le.i32 {} {} {}", reg, lhs, rhs),
+            GeInt(ref reg, ref lhs, ref rhs) => write!(f, "ge.i32 {} {} {}", reg, lhs, rhs),
+            PrintInt(ref val) => write!(f, "print.i32 {}", val),
+            PrintBool(ref val) => write!(f, "print_b.i32 {}", val),
+            PrintChar(ref val) => write!(f, "print_c.i32 {}", val),
+            ReadInt(ref reg) => write!(f, "read.i32 {}", reg),
+            ReadBool(ref reg) => write!(f, "read_b.i32 {}", reg),
+            ReadChar(ref reg) => write!(f, "read_c.i32 {}", reg),
             Nop => write!(f, "nop")
         }
     }
@@ -263,22 +388,59 @@ impl fmt::Display for BasicBlock {
     }
 }
 
+pub struct RegisterAlloc {
+    pub locals: HashMap<usize, IlRegister>,
+    next_reg: u32
+}
+
+impl RegisterAlloc {
+    pub fn new() -> RegisterAlloc {
+        RegisterAlloc {
+            locals: HashMap::new(),
+            next_reg: 0
+        }
+    }
+
+    pub fn get_or_alloc_local(&mut self, id: usize, reg_type: IlType) -> IlRegister {
+        match self.locals.entry(id) {
+            Entry::Occupied(e) => {
+                assert_eq!(reg_type, e.get().1);
+                *e.get()
+            },
+            Entry::Vacant(e) => {
+                let reg = IlRegister(self.next_reg, reg_type);
+
+                e.insert(reg);
+                self.next_reg += 1;
+
+                reg
+            }
+        }
+    }
+
+    pub fn alloc_temp(&mut self, reg_type: IlType) -> IlRegister {
+        let reg = IlRegister(self.next_reg, reg_type);
+
+        self.next_reg += 1;
+
+        reg
+    }
+}
+
 pub struct FlowGraph {
     pub blocks: HashMap<u32, BasicBlock>,
-    pub locals: HashMap<String, IlRegister>,
     pub start_block: u32,
     next_block: u32,
-    next_reg: u32
+    pub registers: RegisterAlloc
 }
 
 impl FlowGraph {
     pub fn new() -> FlowGraph {
         FlowGraph {
             blocks: HashMap::new(),
-            locals: HashMap::new(),
             start_block: 0,
             next_block: 0,
-            next_reg: 0
+            registers: RegisterAlloc::new()
         }
     }
 
@@ -290,21 +452,6 @@ impl FlowGraph {
         self.blocks.insert(self.next_block, b2);
         self.next_block += 1;
         self.next_block - 1
-    }
-
-    pub fn alloc_reg(&mut self) -> IlRegister {
-        self.next_reg += 1;
-        IlRegister(self.next_reg - 1)
-    }
-
-    pub fn get_or_alloc_local(&mut self, name: &str) -> IlRegister {
-        if let Some(reg) = self.locals.get(name).map(|r| *r) {
-            reg
-        } else {
-            let reg = self.alloc_reg();
-            self.locals.insert(name.to_string(), reg);
-            reg
-        }
     }
 }
 
@@ -319,16 +466,19 @@ impl fmt::Display for FlowGraph {
     }
 }
 
-pub fn generate_il(program: &ast::Program, w: &mut Write) -> FlowGraph {
-    let mut g = FlowGraph::new();
-    let mut b = BasicBlock::new(0);
+pub struct Program {
+    pub main_block: FlowGraph,
+    pub funcs: Vec<(usize, FlowGraph)>
+}
 
-    writeln!(w, "========== IL GENERATION ==========\n").unwrap();
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{}", self.main_block)?;
 
-    // TODO Generate IL
-    g.append_block(&mut b);
+        for &(id, ref g) in &self.funcs {
+            writeln!(f, "\nFUNCTION {}:\n{}", id, g)?;
+        };
 
-    writeln!(w, "\n========== GENERATED IL ==========\n{}", g).unwrap();
-
-    g
+        Result::Ok(())
+    }
 }
