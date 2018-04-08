@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt;
+use std::iter::FromIterator;
 use std::mem;
+
+use util::DeferredDisplay;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IlFloat(pub u64);
@@ -105,6 +108,8 @@ impl fmt::Display for IlOperand {
 pub enum IlInstruction {
     JumpNonZero(IlOperand, u32),
     JumpZero(IlOperand, u32),
+    Return(IlOperand),
+    CallDirect(IlRegister, usize, Vec<IlOperand>),
 
     Copy(IlRegister, IlOperand),
     AddInt(IlRegister, IlOperand, IlOperand),
@@ -154,6 +159,10 @@ impl IlInstruction {
         match *self {
             JumpNonZero(ref mut o, _) => f(o),
             JumpZero(ref mut o, _) => f(o),
+            Return(ref mut o) => f(o),
+            CallDirect(_, _, ref mut os) => for o in os {
+                f(o);
+            },
             Copy(_, ref mut o) => f(o),
             AddInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
@@ -207,6 +216,10 @@ impl IlInstruction {
         match *self {
             JumpNonZero(ref o, _) => f(o),
             JumpZero(ref o, _) => f(o),
+            Return(ref o) => f(o),
+            CallDirect(_, _, ref os) => for o in os {
+                f(o);
+            },
             Copy(_, ref o) => f(o),
             AddInt(_, ref o1, ref o2) => {
                 f(o1);
@@ -260,6 +273,8 @@ impl IlInstruction {
         match *self {
             JumpNonZero(_, _) => None,
             JumpZero(_, _) => None,
+            Return(_) => None,
+            CallDirect(r, _, _) => Some(r),
             Copy(r, _) => Some(r),
             AddInt(r, _, _) => Some(r),
             SubInt(r, _, _) => Some(r),
@@ -284,6 +299,7 @@ impl IlInstruction {
     pub fn relink_target(&mut self, target: IlRegister) {
         use il::IlInstruction::*;
         match *self {
+            CallDirect(ref mut old_target, _, _) => mem::replace(old_target, target),
             Copy(ref mut old_target, _) => mem::replace(old_target, target),
             AddInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             SubInt(ref mut old_target, _, _) => mem::replace(old_target, target),
@@ -307,6 +323,8 @@ impl IlInstruction {
         match *self {
             JumpNonZero(_, _) => true,
             JumpZero(_, _) => true,
+            Return(_) => true,
+            CallDirect(_, _, _) => true,
             PrintInt(_) => true,
             PrintBool(_) => true,
             PrintChar(_) => true,
@@ -324,6 +342,16 @@ impl fmt::Display for IlInstruction {
         match *self {
             JumpNonZero(ref cond, ref target) => write!(f, "jnz {} @{}", cond, target),
             JumpZero(ref cond, ref target) => write!(f, "jz {} @{}", cond, target),
+            Return(ref val) => write!(f, "ret {}", val),
+            CallDirect(ref reg, ref fun, ref args) => write!(
+                f,
+                "call {} #{}{}",
+                reg,
+                fun,
+                DeferredDisplay(|f| Result::from_iter(args.iter().map(|a| {
+                    write!(f, " {}", a)
+                })))
+            ),
             Copy(ref reg, ref val) => write!(f, "copy {} {}", reg, val),
             AddInt(ref reg, ref lhs, ref rhs) => write!(f, "add.i32 {} {} {}", reg, lhs, rhs),
             SubInt(ref reg, ref lhs, ref rhs) => write!(f, "sub.i32 {} {} {}", reg, lhs, rhs),
@@ -476,7 +504,7 @@ impl fmt::Display for Program {
         writeln!(f, "{}", self.main_block)?;
 
         for &(id, ref g) in &self.funcs {
-            writeln!(f, "\nFUNCTION {}:\n{}", id, g)?;
+            writeln!(f, "\nFUNCTION #{}:\n{}", id, g)?;
         };
 
         Result::Ok(())

@@ -144,7 +144,7 @@ fn append_expr_to(
             match sym.node {
                 symbol::SymbolType::Var(_) | symbol::SymbolType::Param(_) => {
                     // TODO Handle globals and nonlocals
-                    assert_eq!(sym.defining_fun, ctx.func_id, "Nonlocals are not yet supported");
+                    assert_eq!(sym.defining_fun, ctx.func_id, "nonlocals are not yet supported");
 
                     block.instrs.push(IlInstruction::Copy(
                         target,
@@ -157,6 +157,14 @@ fn append_expr_to(
                 _ => panic!("load from invalid symbol {}", sym_id)
             }
         },
+        Call(box ast::Expr { node: Id(_, func), .. }, ref args) => {
+            let args: Vec<_> = args.iter().map(|a| {
+                IlOperand::Register(append_expr(a, ctx, block, g, w))
+            }).collect();
+
+            block.instrs.push(IlInstruction::CallDirect(target, func, args));
+        },
+        Call(_, _) => panic!("indirect calls are not yet supported"),
         Int(val) => {
             block.instrs.push(IlInstruction::Copy(target, IlOperand::Const(IlConst::Int(val))));
         },
@@ -330,6 +338,15 @@ fn append_stmt(
         Block(ref ast_block) => {
             append_block(ast_block, ctx, block, g, w);
         },
+        Return(ref val) => {
+            let val_reg = append_expr(val, ctx, block, g, w);
+            block.instrs.push(IlInstruction::Return(IlOperand::Register(val_reg)));
+
+            // Note that this basic block is intentionally *not* connected to the next one. This
+            // way, if any statements appear after the return, they will be properly detected as
+            // dead code.
+            g.append_block(block);
+        },
         ref n => panic!("not yet supported: {:?}", n)
     }
 }
@@ -361,7 +378,7 @@ fn generate_function_il(
     if ctx.func_id == !0 {
         writeln!(w, "========== GENERATING IL FOR MAIN BLOCK ==========\n").unwrap();
     } else {
-        writeln!(w, "========== GENERATING IL FOR FUNCTION {} ==========\n", ctx.func_id).unwrap();
+        writeln!(w, "========== GENERATING IL FOR FUNCTION #{} ==========\n", ctx.func_id).unwrap();
     };
 
     append_block(func, ctx, &mut b, &mut g, w);
@@ -381,6 +398,14 @@ pub fn generate_il(program: &ast::Program, w: &mut Write) -> Program {
             tdt: &program.types,
             sdt: &program.symbols
         }, w),
-        funcs: vec![]
+        funcs: program.symbols.iter().filter_map(|(_, sym)| if let symbol::SymbolType::Fun(ref f) = sym.node {
+            Some((sym.id, generate_function_il(&f.body.borrow(), &mut IlGenContext {
+                func_id: sym.id,
+                tdt: &program.types,
+                sdt: &program.symbols
+            }, w)))
+        } else {
+            None
+        }).collect()
     }
 }

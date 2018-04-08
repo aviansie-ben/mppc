@@ -679,4 +679,8 @@ fn optimize_function(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&
 
 pub fn optimize_il(program: &mut Program, w: &mut Write, optimizations: &HashSet<&'static str>) {
     optimize_function(&mut program.main_block, w, optimizations);
+
+    for &mut (_, ref mut g) in &mut program.funcs {
+        optimize_function(g, w, optimizations);
+    };
 }
