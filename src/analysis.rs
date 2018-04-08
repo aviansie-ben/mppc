@@ -290,6 +290,13 @@ macro_rules! block_expr_has_no_value {
     ))
 }
 
+macro_rules! case_expr_disabled {
+    ($span:expr) => ((
+        format!("case expression support is not enabled (did you mean to add `@feature(case_expr)'?)"),
+        $span
+    ))
+}
+
 struct AnalysisContext<'a, 'b> where 'b: 'a {
     tdt: &'a TypeDefinitionTable,
     sdt: &'a SymbolDefinitionTable,
