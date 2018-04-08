@@ -1,4 +1,4 @@
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -109,10 +109,29 @@ pub struct Symbol {
     pub id: usize,
     pub name: String,
     pub span: Span,
-    pub node: SymbolType
+    pub node: SymbolType,
+    pub defining_fun: usize,
+    pub has_nonlocal_references: Cell<bool>
 }
 
 impl Symbol {
+    pub fn new(
+        id: usize,
+        name: String,
+        span: Span,
+        node: SymbolType,
+        defining_fun: usize
+    ) -> Symbol {
+        Symbol {
+            id: id,
+            name: name,
+            span: span,
+            node: node,
+            defining_fun: defining_fun,
+            has_nonlocal_references: Cell::new(false)
+        }
+    }
+
     pub fn val_type(&self) -> Type {
         match self.node {
             SymbolType::Fun(ref sym) => Type::Defined(sym.sig),
@@ -284,14 +303,15 @@ impl SymbolDefinitionTable {
                     mf.funcs.borrow_mut().push((sig, id));
                 },
                 SymbolType::Fun(ref f) => {
-                    symbols.push(Box::new(Symbol {
-                        id: id,
-                        name: s.name.clone(),
-                        span: Span::dummy(),
-                        node: SymbolType::MultiFun(MultiFunSymbol {
+                    symbols.push(Box::new(Symbol::new(
+                        id,
+                        s.name.clone(),
+                        Span::dummy(),
+                        SymbolType::MultiFun(MultiFunSymbol {
                             funcs: RefCell::new(vec![(f.sig, old_sym), (sig, id + 1)])
-                        })
-                    }));
+                        }),
+                        s.defining_fun
+                    )));
                     st.symbol_names.insert(s.name.clone(), id);
                     id = id + 1
                 },

@@ -6,7 +6,6 @@ use std::rc::Rc;
 use ast;
 use lex::Span;
 use symbol::*;
-use util::ChainRef;
 
 lazy_static! {
     static ref VALID_FEATURES: HashSet<&'static str> = {
@@ -298,6 +297,7 @@ macro_rules! case_expr_disabled {
 }
 
 struct AnalysisContext<'a, 'b> where 'b: 'a {
+    function_id: usize,
     tdt: &'a TypeDefinitionTable,
     sdt: &'a SymbolDefinitionTable,
     features: &'a HashMap<String, Span>,
@@ -307,6 +307,7 @@ struct AnalysisContext<'a, 'b> where 'b: 'a {
 
 impl <'a, 'b> AnalysisContext<'a, 'b> {
     fn new(
+        function_id: usize,
         tdt: &'a TypeDefinitionTable,
         sdt: &'a SymbolDefinitionTable,
         features: &'a HashMap<String, Span>,
@@ -314,6 +315,7 @@ impl <'a, 'b> AnalysisContext<'a, 'b> {
         errors: &'b mut Vec<(String, Span)>
     ) -> AnalysisContext<'a, 'b> {
         AnalysisContext {
+            function_id: function_id,
             tdt: tdt,
             sdt: sdt,
             features: features,
@@ -322,11 +324,13 @@ impl <'a, 'b> AnalysisContext<'a, 'b> {
         }
     }
 
-    fn with_expected_return<'c>(
+    fn inside_function<'c>(
         &'c self,
+        function_id: usize,
         expected_return: Option<&'c Type>
     ) -> AnalysisContext<'c, 'b> {
         AnalysisContext {
+            function_id: function_id,
             tdt: self.tdt,
             sdt: self.sdt,
             features: self.features,
@@ -468,42 +472,45 @@ fn create_symbol_for_decl(
 
             let params: Vec<_> = {
                 let mut fn_symbols = &mut body.symbols.borrow_mut();
-                sig.params.into_iter().map(|p| ctx.sdt.add_named_symbol(fn_symbols, Symbol {
-                    id: 0,
-                    name: p.id,
-                    span: p.span,
-                    node: SymbolType::Param(ParamSymbol {
+                sig.params.into_iter().map(|p| ctx.sdt.add_named_symbol(fn_symbols, Symbol::new(
+                    0,
+                    p.id,
+                    p.span,
+                    SymbolType::Param(ParamSymbol {
                         val_type: resolve_type(&p.val_type, ctx, symbols)
-                    })
-                })).collect()
+                    }),
+                    ctx.function_id
+                ))).collect()
             };
 
             if define {
-                ctx.sdt.add_named_function_symbol(symbols, Symbol {
-                    id: 0,
-                    name: name.to_string(),
-                    span: decl.span,
-                    node: SymbolType::Fun(FunSymbol {
+                ctx.sdt.add_named_function_symbol(symbols, Symbol::new(
+                    0,
+                    name.to_string(),
+                    decl.span,
+                    SymbolType::Fun(FunSymbol {
                         sig: fn_type,
                         params: params,
                         body: RefCell::new(body)
-                    })
-                });
+                    }),
+                    ctx.function_id
+                ));
             };
         },
         ast::DeclType::Var(spec, val_type) => {
             let val_type = resolve_type(&val_type, ctx, symbols);
 
             if expect_name_not_defined!(ctx, symbols, &spec.id, spec.span) {
-                ctx.sdt.add_named_symbol(symbols, Symbol {
-                    id: 0,
-                    name: spec.id,
-                    span: spec.span,
-                    node: SymbolType::Var(VarSymbol {
+                ctx.sdt.add_named_symbol(symbols, Symbol::new(
+                    0,
+                    spec.id,
+                    spec.span,
+                    SymbolType::Var(VarSymbol {
                         val_type: val_type,
                         dims: RefCell::new(spec.dims)
-                    })
-                });
+                    }),
+                    ctx.function_id
+                ));
             };
         }
     };
@@ -559,15 +566,16 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
 
         for (name, span) in case.vars.drain(..) {
             if expect_name_not_defined!(ctx, sub_symbols, &name, span) {
-                case.var_bindings.push(ctx.sdt.add_named_symbol(sub_symbols, Symbol {
-                    id: 0,
-                    name: name,
-                    span: span,
-                    node: SymbolType::Var(VarSymbol {
+                case.var_bindings.push(ctx.sdt.add_named_symbol(sub_symbols, Symbol::new(
+                    0,
+                    name,
+                    span,
+                    SymbolType::Var(VarSymbol {
                         val_type: Type::Error,
                         dims: RefCell::new(vec![])
-                    })
-                }));
+                    }),
+                    ctx.function_id
+                )));
             } else {
                 case.var_bindings.push(!0);
             };
@@ -604,15 +612,16 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
 
         for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
             if expect_name_not_defined!(ctx, sub_symbols, &name, span) {
-                case.var_bindings.push(ctx.sdt.add_named_symbol(sub_symbols, Symbol {
-                    id: 0,
-                    name: name,
-                    span: span,
-                    node: SymbolType::Var(VarSymbol {
+                case.var_bindings.push(ctx.sdt.add_named_symbol(sub_symbols, Symbol::new(
+                    0,
+                    name,
+                    span,
+                    SymbolType::Var(VarSymbol {
                         val_type: val_type.clone(),
                         dims: RefCell::new(vec![])
-                    })
-                }));
+                    }),
+                    ctx.function_id
+                )));
             } else {
                 case.var_bindings.push(!0);
             };
@@ -788,6 +797,10 @@ fn do_analyze_expression(
 
             let symbols_borrow = &symbols.borrow();
             if let Some(sym) = resolve_symbol(ctx, symbols_borrow, name, expected_type) {
+                if sym.defining_fun != ctx.function_id {
+                    sym.has_nonlocal_references.set(true);
+                };
+
                 expr.assignable = sym.is_assignable();
                 *sym_id = sym.id;
                 return sym.val_type();
@@ -1249,7 +1262,7 @@ fn populate_block_symbol_table(
         let sym = ctx.sdt.get_symbol(sym);
         match sym.node {
             SymbolType::Fun(ref fs) => {
-                populate_function_symbol_table(&fs, &sym.span, ctx, &block.symbols);
+                populate_function_symbol_table(sym.id, &fs, &sym.span, ctx, &block.symbols);
             },
             SymbolType::Var(ref vs) => {
                 for d in vs.dims.borrow_mut().iter_mut() {
@@ -1267,6 +1280,7 @@ fn populate_block_symbol_table(
 }
 
 fn populate_function_symbol_table(
+    id: usize,
     sym: &FunSymbol,
     span: &Span,
     ctx: &AnalysisContext,
@@ -1283,7 +1297,7 @@ fn populate_function_symbol_table(
 
     populate_block_symbol_table(
         block,
-        &ctx.with_expected_return(Some(&return_type))
+        &ctx.inside_function(id, Some(&return_type))
     );
 
     if ctx.features.contains_key("return_anywhere") {
@@ -1353,6 +1367,6 @@ pub fn populate_symbol_tables(
 
     populate_block_symbol_table(
         &mut program.block,
-        &AnalysisContext::new(&program.types, &program.symbols, &program.features, None, errors)
+        &AnalysisContext::new(!0, &program.types, &program.symbols, &program.features, None, errors)
     );
 }
