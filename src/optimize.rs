@@ -277,7 +277,7 @@ fn do_constant_fold(
         assigns.clear();
 
         for i in &mut b.instrs {
-            let old = *i;
+            let old = i.clone();
 
             // Look at the operands of the current instruction. If the operand is a register whose
             // value is known (either to be a constant or to be a copy of another register), replace
@@ -285,9 +285,9 @@ fn do_constant_fold(
             i.mutate_operands(|o| {
                 if let Register(reg) = o {
                     if let Some(Some(val)) = assigns.get(reg) {
-                        mem::replace(o, *val);
+                        mem::replace(o, val.clone());
                     } else if let Some(Some(val)) = input.and_then(|input| input.get(reg)) {
-                        mem::replace(o, *val);
+                        mem::replace(o, val.clone());
                     };
                 };
             });
@@ -298,10 +298,10 @@ fn do_constant_fold(
             // substituted for uses of the target register later. Otherwise, mark the value of the
             // target register as being unknown at this point in the basic block.
             if let Some((r, c)) = try_fold_constant(i) {
-                mem::replace(i, Copy(r, c));
+                mem::replace(i, Copy(r, c.clone()));
                 assigns.insert(r, Some(c));
-            } else if let Copy(r, v) = *i {
-                assigns.insert(r, Some(v));
+            } else if let Copy(r, ref v) = *i {
+                assigns.insert(r, Some(v.clone()));
             } else if let Some(r) = i.target_register() {
                 assigns.insert(r, None);
             }
@@ -357,7 +357,7 @@ fn propagate_single_constant(
     if !next_assigns.contains_key(reg) {
         let result = if let Some(val) = val {
             if let Some(old_val) = next_consts.get(reg) {
-                if old_val != &None && old_val != &Some(*val) {
+                if old_val != &None && old_val.as_ref() != Some(val) {
                     // The value coming in through this path was constant, but is different from the
                     // value coming in from another path to this block. Thus, the value of the
                     // register must be marked as unknown.
@@ -371,7 +371,7 @@ fn propagate_single_constant(
                 // The value coming in through this path was constant and no other path has given a
                 // value for this register. Thus, the value of the register in this block can be
                 // temporarily guessed to be the constant we found.
-                Some(Some(*val))
+                Some(Some(val.clone()))
             }
         } else {
             if let Some(None) = next_consts.get(reg) {
@@ -538,13 +538,13 @@ fn do_dead_jump_elimination(g: &mut FlowGraph, w: &mut Write) -> u32 {
         // Find jumps that are either always taken or are never taken. These include jumps whose
         // values are constants and jumps whose targets are the same as their basic block's
         // fallthrough target (the same target is reached whether or not the jump is taken).
-        let jump_info = match b.instrs.last().map(|i| *i) {
-            Some(JumpZero(Const(Int(0)), target)) => Some(Some(target)),
-            Some(JumpZero(Const(Int(_)), _)) => Some(b.successor),
-            Some(JumpZero(_, target)) if Some(target) == b.successor => Some(b.successor),
-            Some(JumpNonZero(Const(Int(0)), _)) => Some(b.successor),
-            Some(JumpNonZero(Const(Int(_)), target)) => Some(Some(target)),
-            Some(JumpNonZero(_, target)) if Some(target) == b.successor => Some(b.successor),
+        let jump_info = match b.instrs.last() {
+            Some(&JumpZero(Const(Int(0)), target)) => Some(Some(target)),
+            Some(&JumpZero(Const(Int(_)), _)) => Some(b.successor),
+            Some(&JumpZero(_, target)) if Some(target) == b.successor => Some(b.successor),
+            Some(&JumpNonZero(Const(Int(0)), _)) => Some(b.successor),
+            Some(&JumpNonZero(Const(Int(_)), target)) => Some(Some(target)),
+            Some(&JumpNonZero(_, target)) if Some(target) == b.successor => Some(b.successor),
             _ => None
         };
 

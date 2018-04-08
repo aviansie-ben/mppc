@@ -29,7 +29,7 @@ pub enum IlType {
     Addr
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IlConst {
     Int(i32),
     Float(IlFloat),
@@ -85,7 +85,7 @@ impl fmt::Display for IlRegister {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IlOperand {
     Register(IlRegister),
     Const(IlConst)
@@ -101,7 +101,7 @@ impl fmt::Display for IlOperand {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IlInstruction {
     JumpNonZero(IlOperand, u32),
     JumpZero(IlOperand, u32),
