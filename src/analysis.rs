@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::rc::Rc;
@@ -34,9 +34,9 @@ macro_rules! name_already_defined {
 }
 
 macro_rules! expect_name_not_defined {
-    ($symbols:expr, $errors:expr, $name:expr, $span:expr) => {{
+    ($ctx:expr, $symbols:expr, $name:expr, $span:expr) => {{
         if let Some(old_sym) = $symbols.find_imm_named_symbol($name) {
-            $errors.push(name_already_defined!($name, $span, old_sym));
+            $ctx.push_error(name_already_defined!($name, $span, old_sym));
             false
         } else {
             true
@@ -117,20 +117,20 @@ macro_rules! wrong_number_of_args {
 }
 
 macro_rules! cannot_convert {
-    ($tdt:expr, $expr:expr, $expected_type:expr) => ((
+    ($ctx:expr, $expr:expr, $expected_type:expr) => ((
         format!(
             "cannot convert from {} to {}",
-            $expr.val_type.pretty($tdt),
-            $expected_type.pretty($tdt)
+            $expr.val_type.pretty($ctx.tdt),
+            $expected_type.pretty($ctx.tdt)
         ),
         $expr.span
     ))
 }
 
 macro_rules! expect_convert_exact {
-    ($tdt:expr, $errors:expr, $expr:expr, $expected_type:expr) => {{
+    ($ctx:expr, $expr:expr, $expected_type:expr) => {{
         if !$expr.val_type.can_convert_to_exact($expected_type) {
-            $errors.push(cannot_convert!($tdt, $expr, $expected_type));
+            $ctx.push_error(cannot_convert!($ctx, $expr, $expected_type));
             false
         } else {
             true
@@ -146,69 +146,69 @@ macro_rules! cannot_return_outside_func {
 }
 
 macro_rules! cannot_pattern_match {
-    ($tdt:expr, $expr:expr) => ((
-        format!("cannot pattern match on a value of type {}", $expr.val_type.pretty($tdt)),
+    ($ctx:expr, $expr:expr) => ((
+        format!("cannot pattern match on a value of type {}", $expr.val_type.pretty($ctx.tdt)),
         $expr.span
     ))
 }
 
 macro_rules! cannot_read {
-    ($tdt:expr, $expr:expr) => ((
-        format!("cannot read a value of type {}", $expr.val_type.pretty($tdt)),
+    ($ctx:expr, $expr:expr) => ((
+        format!("cannot read a value of type {}", $expr.val_type.pretty($ctx.tdt)),
         $expr.span
     ))
 }
 
 macro_rules! cannot_print {
-    ($tdt:expr, $expr:expr) => ((
-        format!("cannot print a value of type {}", $expr.val_type.pretty($tdt)),
+    ($ctx:expr, $expr:expr) => ((
+        format!("cannot print a value of type {}", $expr.val_type.pretty($ctx.tdt)),
         $expr.span
     ))
 }
 
 macro_rules! no_such_operator {
-    ($tdt:expr, $op:expr, $val:expr, $span:expr) => ((
-        format!("no operator {} exists for {}", $op, $val.val_type.pretty($tdt)),
+    ($ctx:expr, $op:expr, $val:expr, $span:expr) => ((
+        format!("no operator {} exists for {}", $op, $val.val_type.pretty($ctx.tdt)),
         $span
     ));
 
-    ($tdt:expr, $op:expr, $val1:expr, $val2:expr, $span:expr) => ((
+    ($ctx:expr, $op:expr, $val1:expr, $val2:expr, $span:expr) => ((
         format!(
             "no operator {} exists for {} and {}",
             $op,
-            $val1.val_type.pretty($tdt),
-            $val2.val_type.pretty($tdt)
+            $val1.val_type.pretty($ctx.tdt),
+            $val2.val_type.pretty($ctx.tdt)
         ),
         $span
     ))
 }
 
 macro_rules! cannot_get_size {
-    ($tdt:expr, $val:expr, $span:expr) => ((
-        format!("cannot use size operator on value of type {}", $val.val_type.pretty($tdt)),
+    ($ctx:expr, $val:expr, $span:expr) => ((
+        format!("cannot use size operator on value of type {}", $val.val_type.pretty($ctx.tdt)),
         $span
     ));
 
-    ($tdt:expr, $val:expr, $dim:expr, $span:expr) => ((
+    ($ctx:expr, $val:expr, $dim:expr, $span:expr) => ((
         format!(
             "cannot get the size of dimension {} of a value of type {}",
             $dim,
-            $val.val_type.pretty($tdt)
+            $val.val_type.pretty($ctx.tdt)
         ),
         $span
     ))
 }
 
 macro_rules! cannot_call {
-    ($tdt:expr, $func:expr, $span:expr) => ((
-        format!("cannot call expression of type {}", $func.val_type.pretty($tdt)),
+    ($ctx:expr, $func:expr, $span:expr) => ((
+        format!("cannot call expression of type {}", $func.val_type.pretty($ctx.tdt)),
         $span
     ))
 }
 
 macro_rules! cannot_index {
-    ($tdt:expr, $val:expr, $span:expr) => ((
-        format!("cannot index into value of type {}", $val.val_type.pretty($tdt)),
+    ($ctx:expr, $val:expr, $span:expr) => ((
+        format!("cannot index into value of type {}", $val.val_type.pretty($ctx.tdt)),
         $span
     ))
 }
@@ -222,7 +222,7 @@ macro_rules! cannot_assign {
 
 // TODO Better error message
 macro_rules! no_function_match {
-    ($tdt:expr, $params:expr, $defs:expr, $span:expr) => ((
+    ($ctx:expr, $params:expr, $defs:expr, $span:expr) => ((
         "none of these functions matches the given arguments".to_string(),
         $span
     ))
@@ -230,7 +230,7 @@ macro_rules! no_function_match {
 
 // TODO Better error message
 macro_rules! no_constructor_match {
-    ($tdt:expr, $name:expr, $params:expr, $defs:expr, $span:expr) => ((
+    ($ctx:expr, $name:expr, $params:expr, $defs:expr, $span:expr) => ((
         format!("no constructor #{} in this scope matches the given arguments", $name),
         $span
     ))
@@ -276,11 +276,49 @@ macro_rules! missing_else {
     ))
 }
 
+struct AnalysisContext<'a, 'b> where 'b: 'a {
+    tdt: &'a TypeDefinitionTable,
+    features: &'a HashMap<String, Span>,
+    expected_return: Option<&'a Type>,
+    errors: UnsafeCell<&'b mut Vec<(String, Span)>>
+}
+
+impl <'a, 'b> AnalysisContext<'a, 'b> {
+    fn new(
+        tdt: &'a TypeDefinitionTable,
+        features: &'a HashMap<String, Span>,
+        expected_return: Option<&'a Type>,
+        errors: &'b mut Vec<(String, Span)>
+    ) -> AnalysisContext<'a, 'b> {
+        AnalysisContext {
+            tdt: tdt,
+            features: features,
+            expected_return: expected_return,
+            errors: UnsafeCell::new(errors)
+        }
+    }
+
+    fn with_expected_return<'c>(
+        &'c self,
+        expected_return: Option<&'c Type>
+    ) -> AnalysisContext<'c, 'b> {
+        AnalysisContext {
+            tdt: self.tdt,
+            features: self.features,
+            expected_return: expected_return,
+            errors: UnsafeCell::new(unsafe { *self.errors.get() }),
+        }
+    }
+
+    fn push_error(&self, error: (String, Span)) -> () {
+        unsafe { &mut *self.errors.get() }.push(error);
+    }
+}
+
 fn resolve_type(
-    tdt: &TypeDefinitionTable,
-    symbols: &SymbolTable,
-    errors: &mut Vec<(String, Span)>,
     t: &ast::Type,
+    ctx: &AnalysisContext,
+    symbols: &SymbolTable,
 ) -> Type {
     match *t {
         ast::Type::Int => Type::Int,
@@ -291,22 +329,21 @@ fn resolve_type(
             if let Some((type_id, _)) = symbols.find_named_type(name) {
                 Type::Defined(type_id)
             } else {
-                errors.push(type_not_defined!(name, *span));
+                ctx.push_error(type_not_defined!(name, *span));
                 Type::Error
             }
         },
         ast::Type::Array(ref inner_type, ref dims) => Type::Array(
-            Box::new(resolve_type(tdt, symbols, errors, inner_type)),
+            Box::new(resolve_type(inner_type, ctx, symbols)),
             *dims
         )
     }
 }
 
 fn create_symbol_for_decl(
-    tdt: &TypeDefinitionTable,
-    symbols: &mut SymbolTable,
-    errors: &mut Vec<(String, Span)>,
-    decl: ast::Decl
+    decl: ast::Decl,
+    ctx: &AnalysisContext,
+    symbols: &mut SymbolTable
 ) {
     match decl.node {
         ast::DeclType::Data(name, type_id, ctors) => {
@@ -316,7 +353,7 @@ fn create_symbol_for_decl(
                     DataTypeCtor {
                         name: ctor.cid.to_string(),
                         args: ctor.types.iter()
-                            .map(|t| resolve_type(tdt, symbols, errors, t))
+                            .map(|t| resolve_type(t, ctx, symbols))
                             .collect(),
                         span: ctor.span
                     }
@@ -331,7 +368,7 @@ fn create_symbol_for_decl(
             for (i, c1) in type_def.ctors[1..].iter().enumerate() {
                 for c2 in &type_def.ctors[..(i + 1)] {
                     if c1.name == c2.name {
-                        errors.push(constructor_already_defined!(c1.name, c1.span, c2.span));
+                        ctx.push_error(constructor_already_defined!(c1.name, c1.span, c2.span));
                         bad_ctors.push(i + 1);
                         break;
                     };
@@ -346,14 +383,14 @@ fn create_symbol_for_decl(
                 symbols.add_ctor(ctor.name.clone(), (type_id, i));
             };
 
-            tdt.define_type(type_id, TypeDefinition::Data(type_def));
+            ctx.tdt.define_type(type_id, TypeDefinition::Data(type_def));
         },
         ast::DeclType::Fun(name, sig, body) => {
             let params: Vec<_> = sig.params.iter()
-                .map(|p| resolve_type(tdt, symbols, errors, &p.val_type))
+                .map(|p| resolve_type(&p.val_type, ctx, symbols))
                 .collect();
-            let return_type = resolve_type(tdt, symbols, errors, &sig.return_type);
-            let fn_type = tdt.get_function_type(&params, &return_type);
+            let return_type = resolve_type(&sig.return_type, ctx, symbols);
+            let fn_type = ctx.tdt.get_function_type(&params, &return_type);
 
             let define = if let Some(old_sym) = symbols.find_imm_named_symbol(&name) {
                 fn does_sig_conflict(
@@ -376,14 +413,14 @@ fn create_symbol_for_decl(
                 }
 
                 let conflict_sym = match old_sym.node {
-                    SymbolType::Fun(ref f) => if does_sig_conflict(tdt, &params, f.sig) {
+                    SymbolType::Fun(ref f) => if does_sig_conflict(ctx.tdt, &params, f.sig) {
                         Some(ChainRef::clone(&old_sym))
                     } else {
                         None
                     },
                     SymbolType::MultiFun(ref old_sym) => {
                         old_sym.funcs.borrow().iter()
-                            .find(|&&(sig, _)| does_sig_conflict(tdt, &params, sig))
+                            .find(|&&(sig, _)| does_sig_conflict(ctx.tdt, &params, sig))
                             .map(|&(_, sym_id)| symbols.find_symbol(sym_id).unwrap())
                     },
                     _ => Some(ChainRef::clone(&old_sym))
@@ -391,9 +428,9 @@ fn create_symbol_for_decl(
 
                 if let Some(conflict_sym) = conflict_sym {
                     if let SymbolType::Fun(_) = conflict_sym.node {
-                        errors.push(function_definition_conflict!(decl, conflict_sym));
+                        ctx.push_error(function_definition_conflict!(decl, conflict_sym));
                     } else {
-                        errors.push(name_already_defined!(name, decl.span, conflict_sym));
+                        ctx.push_error(name_already_defined!(name, decl.span, conflict_sym));
                     };
                     false
                 } else {
@@ -410,7 +447,7 @@ fn create_symbol_for_decl(
                     name: p.id,
                     span: p.span,
                     node: SymbolType::Param(ParamSymbol {
-                        val_type: resolve_type(tdt, symbols, errors, &p.val_type)
+                        val_type: resolve_type(&p.val_type, ctx, symbols)
                     })
                 })).collect()
             };
@@ -429,9 +466,9 @@ fn create_symbol_for_decl(
             };
         },
         ast::DeclType::Var(spec, val_type) => {
-            let val_type = resolve_type(tdt, symbols, errors, &val_type);
+            let val_type = resolve_type(&val_type, ctx, symbols);
 
-            if expect_name_not_defined!(symbols, errors, &spec.id, spec.span) {
+            if expect_name_not_defined!(ctx, symbols, &spec.id, spec.span) {
                 symbols.add_symbol(Symbol {
                     id: 0,
                     name: spec.id,
@@ -465,19 +502,16 @@ fn analyze_call_signature(
     span: &Span,
     expected_types: &[Type],
     params: &mut [ast::Expr],
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
-    symbols: &Rc<RefCell<SymbolTable>>,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    ctx: &AnalysisContext,
+    symbols: &Rc<RefCell<SymbolTable>>
 ) {
     if params.len() != expected_types.len() {
-        errors.push(wrong_number_of_args!(params.len(), expected_types.len(), *span));
+        ctx.push_error(wrong_number_of_args!(params.len(), expected_types.len(), *span));
     };
 
     for (et, param) in expected_types.iter().zip(params.iter_mut()) {
-        analyze_expression(param, features, tdt, symbols, Some(et), expected_return, errors);
-        expect_convert_exact!(tdt, errors, param, et);
+        analyze_expression(param, ctx, symbols, Some(et));
+        expect_convert_exact!(ctx, param, et);
     };
 }
 
@@ -485,23 +519,20 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
     val: &mut ast::Expr,
     cases: &mut [ast::Case<T>],
     get_symbols: U,
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
-    symbols: &Rc<RefCell<SymbolTable>>,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    ctx: &AnalysisContext,
+    symbols: &Rc<RefCell<SymbolTable>>
 ) -> () {
     fn analyze_case_error<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         case: &mut ast::Case<T>,
         get_symbols: &U,
-        symbols: &Rc<RefCell<SymbolTable>>,
-        errors: &mut Vec<(String, Span)>
+        ctx: &AnalysisContext,
+        symbols: &Rc<RefCell<SymbolTable>>
     ) {
         let mut sub_symbols = get_symbols(&mut case.branch).borrow_mut();
         sub_symbols.set_parent(symbols.clone());
 
         for (name, span) in case.vars.drain(..) {
-            if expect_name_not_defined!(sub_symbols, errors, &name, span) {
+            if expect_name_not_defined!(ctx, sub_symbols, &name, span) {
                 case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                     id: 0,
                     name: name,
@@ -521,24 +552,24 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         case: &mut ast::Case<T>,
         typedef: &DataTypeDefinition,
         get_symbols: &U,
-        symbols: &Rc<RefCell<SymbolTable>>,
-        errors: &mut Vec<(String, Span)>
+        ctx: &AnalysisContext,
+        symbols: &Rc<RefCell<SymbolTable>>
     ) {
         let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
             ctor
         } else {
-            errors.push(constructor_not_defined!(case.cid, case.span, typedef.name));
+            ctx.push_error(constructor_not_defined!(case.cid, case.span, typedef.name));
 
-            analyze_case_error(case, get_symbols, symbols, errors);
+            analyze_case_error(case, get_symbols, ctx, symbols);
             return;
         };
 
         case.ctor_id = ctor_id;
 
         if ctor.args.len() != case.vars.len() {
-            errors.push(wrong_number_of_args!(case.vars.len(), ctor.args.len(), case.span));
+            ctx.push_error(wrong_number_of_args!(case.vars.len(), ctor.args.len(), case.span));
 
-            analyze_case_error(case, get_symbols, symbols, errors);
+            analyze_case_error(case, get_symbols, ctx, symbols);
             return;
         };
 
@@ -546,7 +577,7 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         sub_symbols.set_parent(symbols.clone());
 
         for ((name, span), val_type) in case.vars.drain(..).zip(ctor.args.iter()) {
-            if expect_name_not_defined!(sub_symbols, errors, &name, span) {
+            if expect_name_not_defined!(ctx, sub_symbols, &name, span) {
                 case.var_bindings.push(sub_symbols.add_symbol(Symbol {
                     id: 0,
                     name: name,
@@ -563,9 +594,9 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
     }
 
     {
-        let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
+        let val_type = analyze_expression(val, ctx, symbols, None);
         let typedef = if let Type::Defined(ref type_id) = val_type {
-            if let TypeDefinition::Data(ref typedef) = tdt.get_definition(*type_id) {
+            if let TypeDefinition::Data(ref typedef) = ctx.tdt.get_definition(*type_id) {
                 Some(typedef)
             } else {
                 None
@@ -577,19 +608,19 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         if let Some(typedef) = typedef {
             let mut handled_cases: Vec<(usize, Span)> = Vec::new();
             for case in cases.iter_mut() {
-                analyze_case(case, typedef, &get_symbols, symbols, errors);
+                analyze_case(case, typedef, &get_symbols, ctx, symbols);
 
                 if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
-                    errors.push(duplicate_case!(case.cid, case.span, prev_span));
+                    ctx.push_error(duplicate_case!(case.cid, case.span, prev_span));
                 } else {
                     handled_cases.push((case.ctor_id, case.span));
                 };
             };
         } else {
-            errors.push(cannot_pattern_match!(tdt, val));
+            ctx.push_error(cannot_pattern_match!(ctx, val));
 
             for case in cases.iter_mut() {
-                analyze_case_error(case, &get_symbols, symbols, errors);
+                analyze_case_error(case, &get_symbols, ctx, symbols);
             };
         };
     };
@@ -615,18 +646,15 @@ fn get_expression_symbols(
 
 fn do_analyze_expression(
     expr: &mut ast::Expr,
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
+    ctx: &AnalysisContext,
     symbols: &Rc<RefCell<SymbolTable>>,
-    expected_type: Option<&Type>,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    expected_type: Option<&Type>
 ) -> Type {
     match expr.node {
         ast::ExprType::BinaryOp(op, ref mut lhs, ref mut rhs, ref mut sym_op) => {
             let val_types = [
-                analyze_expression(lhs, features, tdt, symbols, None, expected_return, errors),
-                analyze_expression(rhs, features, tdt, symbols, None, expected_return, errors)
+                analyze_expression(lhs, ctx, symbols, None),
+                analyze_expression(rhs, ctx, symbols, None)
             ];
 
             if val_types[0] == Type::Error || val_types[1] == Type::Error {
@@ -651,18 +679,18 @@ fn do_analyze_expression(
             };
 
             if let Some(&(ref params, ref result, op)) = op_impl {
-                analyze_expression(lhs, features, tdt, symbols, Some(&params[0]), expected_return, errors);
-                analyze_expression(rhs, features, tdt, symbols, Some(&params[1]), expected_return, errors);
+                analyze_expression(lhs, ctx, symbols, Some(&params[0]));
+                analyze_expression(rhs, ctx, symbols, Some(&params[1]));
                 *sym_op = op;
 
                 return result.clone();
             } else {
-                errors.push(no_such_operator!(tdt, op, lhs, rhs, expr.span));
+                ctx.push_error(no_such_operator!(ctx, op, lhs, rhs, expr.span));
                 return Type::Error;
             };
         },
         ast::ExprType::UnaryOp(op, ref mut val, ref mut sym_op) => {
-            let val_types = [analyze_expression(val, features, tdt, symbols, None, expected_return, errors)];
+            let val_types = [analyze_expression(val, ctx, symbols, None)];
 
             if val_types[0] == Type::Error {
                 return Type::Error;
@@ -686,24 +714,24 @@ fn do_analyze_expression(
             };
 
             if let Some(&(ref params, ref result, op)) = op_impl {
-                analyze_expression(val, features, tdt, symbols, Some(&params[0]), expected_return, errors);
+                analyze_expression(val, ctx, symbols, Some(&params[0]));
                 *sym_op = op;
 
                 return result.clone();
             } else {
-                errors.push(no_such_operator!(tdt, op, val, expr.span));
+                ctx.push_error(no_such_operator!(ctx, op, val, expr.span));
                 return Type::Error;
             };
         },
         ast::ExprType::Size(ref mut val, dim) => {
-            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
+            let val_type = analyze_expression(val, ctx, symbols, None);
 
             if let Type::Array(_, val_dims) = val_type {
                 if dim >= val_dims {
-                    errors.push(cannot_get_size!(tdt, val, dim, expr.span));
+                    ctx.push_error(cannot_get_size!(ctx, val, dim, expr.span));
                 };
             } else {
-                errors.push(cannot_get_size!(tdt, val, expr.span));
+                ctx.push_error(cannot_get_size!(ctx, val, expr.span));
             };
             return Type::Int;
         },
@@ -743,7 +771,7 @@ fn do_analyze_expression(
                 return sym.val_type();
             } else {
                 expr.assignable = true;
-                errors.push(variable_not_defined!(name, expr.span));
+                ctx.push_error(variable_not_defined!(name, expr.span));
                 return Type::Error
             };
         },
@@ -777,25 +805,25 @@ fn do_analyze_expression(
                 }
             }
 
-            let func_type = analyze_expression(func, features, tdt, symbols, None, expected_return, errors);
+            let func_type = analyze_expression(func, ctx, symbols, None);
 
             if expr.val_type == Type::Unknown {
                 for param in params.iter_mut() {
-                    analyze_expression(param, features, tdt, symbols, None, expected_return, errors);
+                    analyze_expression(param, ctx, symbols, None);
                 };
             };
 
-            let typedefs = get_function_typedefs(&func_type, tdt);
+            let typedefs = get_function_typedefs(&func_type, ctx.tdt);
 
             if typedefs.len() == 0 {
-                errors.push(cannot_call!(tdt, func, expr.span));
+                ctx.push_error(cannot_call!(ctx, func, expr.span));
                 return Type::Error;
             } else if typedefs.len() == 1 {
-                analyze_call_signature(&expr.span, &typedefs[0].1.params, params, features, tdt, symbols, expected_return, errors);
+                analyze_call_signature(&expr.span, &typedefs[0].1.params, params, ctx, symbols);
                 return typedefs[0].1.return_type.clone();
             } else {
                 let param_types: Vec<_> = params.iter_mut()
-                    .map(|p| analyze_expression(p, features, tdt, symbols, None, expected_return, errors))
+                    .map(|p| analyze_expression(p, ctx, symbols, None))
                     .collect();
                 let valid_typedefs = get_valid_call_signatures(
                     &param_types[..],
@@ -803,27 +831,21 @@ fn do_analyze_expression(
                 );
 
                 if valid_typedefs.len() == 0 {
-                    errors.push(no_function_match!(tdt, params, typedefs, expr.span));
+                    ctx.push_error(no_function_match!(ctx, params, typedefs, expr.span));
                     return Type::Error;
                 } else if valid_typedefs.len() == 1 {
                     analyze_expression(
                         func,
-                        features,
-                        tdt,
+                        ctx,
                         symbols,
-                        Some(&Type::Defined(typedefs[valid_typedefs[0]].0)),
-                        expected_return,
-                        errors
+                        Some(&Type::Defined(typedefs[valid_typedefs[0]].0))
                     );
                     analyze_call_signature(
                         &expr.span,
                         &typedefs[valid_typedefs[0]].1.params,
                         params,
-                        features,
-                        tdt,
-                        symbols,
-                        expected_return,
-                        errors
+                        ctx,
+                        symbols
                     );
                     return typedefs[valid_typedefs[0]].1.return_type.clone();
                 } else {
@@ -834,10 +856,10 @@ fn do_analyze_expression(
             };
         },
         ast::ExprType::Index(ref mut val, ref mut index) => {
-            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
+            let val_type = analyze_expression(val, ctx, symbols, None);
 
-            analyze_expression(index, features, tdt, symbols, Some(&Type::Int), expected_return, errors);
-            expect_convert_exact!(tdt, errors, index, &Type::Int);
+            analyze_expression(index, ctx, symbols, Some(&Type::Int));
+            expect_convert_exact!(ctx, index, &Type::Int);
 
             if let Type::Array(inner_type, dims) = val_type {
                 return if dims == 1 {
@@ -848,14 +870,14 @@ fn do_analyze_expression(
                 };
             } else {
                 expr.assignable = true;
-                errors.push(cannot_index!(tdt, val, expr.span));
+                ctx.push_error(cannot_index!(ctx, val, expr.span));
                 return Type::Error;
             };
         },
         ast::ExprType::Cons(ref name, ref mut params, ref mut expr_ctor_id) => {
             if expr.val_type == Type::Unknown {
                 for param in params.iter_mut() {
-                    analyze_expression(param, features, tdt, symbols, None, expected_return, errors);
+                    analyze_expression(param, ctx, symbols, None);
                 };
             };
 
@@ -863,18 +885,18 @@ fn do_analyze_expression(
             let ctors = if let Some(ctors) = symbols_borrow.find_ctors(name) {
                 ctors
             } else {
-                errors.push(constructor_not_defined!(name, expr.span));
+                ctx.push_error(constructor_not_defined!(name, expr.span));
                 return Type::Error;
             };
 
             if ctors.len() == 1 {
                 let ctor_id = ctors[0];
-                let ctor = match tdt.get_definition(ctor_id.0) {
+                let ctor = match ctx.tdt.get_definition(ctor_id.0) {
                     TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                     _ => panic!("invalid data type")
                 };
 
-                analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
+                analyze_call_signature(&expr.span, &ctor.args, params, ctx, symbols);
                 *expr_ctor_id = ctor_id.1;
                 return Type::Defined(ctor_id.0);
             } else {
@@ -882,19 +904,19 @@ fn do_analyze_expression(
                     let ctor_id = ctors.iter().find(|ctor_id| &ctor_id.0 == expected_type);
 
                     if let Some(ctor_id) = ctor_id {
-                        let ctor = match tdt.get_definition(ctor_id.0) {
+                        let ctor = match ctx.tdt.get_definition(ctor_id.0) {
                             TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                             _ => panic!("invalid data type")
                         };
 
-                        analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
+                        analyze_call_signature(&expr.span, &ctor.args, params, ctx, symbols);
                         *expr_ctor_id = ctor_id.1;
                         return Type::Defined(ctor_id.0);
                     };
                 };
 
                 let valid_ctors: Vec<_> = ctors.iter().map(|ctor_id| {
-                    let ctor = match tdt.get_definition(ctor_id.0) {
+                    let ctor = match ctx.tdt.get_definition(ctor_id.0) {
                         TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
                         _ => panic!("invalid data type")
                     };
@@ -905,12 +927,12 @@ fn do_analyze_expression(
                 if valid_ctors.len() == 0 {
                     let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
 
-                    errors.push(no_constructor_match!(tdt, name, param_types, ctors, expr.span));
+                    ctx.push_error(no_constructor_match!(ctx, name, param_types, ctors, expr.span));
                     return Type::Error;
                 } else if valid_ctors.len() == 1 {
                     let (ctor, ctor_id) = valid_ctors[0];
 
-                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
+                    analyze_call_signature(&expr.span, &ctor.args, params, ctx, symbols);
                     *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 }
@@ -926,11 +948,11 @@ fn do_analyze_expression(
                 }).collect();
 
                 if valid_ctors.len() == 0 {
-                    errors.push(no_constructor_match!(tdt, name, param_types, ctors, expr.span));
+                    ctx.push_error(no_constructor_match!(ctx, name, param_types, ctors, expr.span));
                     return Type::Error;
                 } else if valid_ctors.len() == 1 {
                     let (ctor, ctor_id) = valid_ctors[0];
-                    analyze_call_signature(&expr.span, &ctor.args, params, features, tdt, symbols, expected_return, errors);
+                    analyze_call_signature(&expr.span, &ctor.args, params, ctx, symbols);
                     *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 } else {
@@ -946,8 +968,8 @@ fn do_analyze_expression(
         ast::ExprType::Char(_) => return Type::Char,
         ast::ExprType::Block(ref mut block, ref mut result) => {
             if expr.val_type == Type::Unknown {
-                if !expr.synthetic && !features.contains_key("block_expr") {
-                    errors.push((
+                if !expr.synthetic && !ctx.features.contains_key("block_expr") {
+                    ctx.push_error((
                         format!("block expression support is not enabled (did you mean to add `@feature(block_expr)'?)"),
                         expr.span
                     ));
@@ -961,23 +983,20 @@ fn do_analyze_expression(
                     }
                 };
 
-                populate_block_symbol_table(features, tdt, block, expected_return, errors);
+                populate_block_symbol_table(block, ctx);
             };
 
             if let Some(result) = result {
                 return analyze_expression(
                     result,
-                    features,
-                    tdt,
+                    ctx,
                     &block.symbols,
-                    expected_type,
-                    expected_return,
-                    errors
+                    expected_type
                 );
             } else if block.stmts.iter().any(|s| s.will_return) {
                 return Type::Never;
             } else {
-                errors.push((
+                ctx.push_error((
                     "this block expression has no value and does not always return".to_string(),
                     expr.span
                 ));
@@ -986,14 +1005,14 @@ fn do_analyze_expression(
         },
         ast::ExprType::Case(ref mut val, ref mut cases) => {
             if expr.val_type == Type::Unknown {
-                if !expr.synthetic && !features.contains_key("case_expr") {
-                    errors.push((
+                if !expr.synthetic && !ctx.features.contains_key("case_expr") {
+                    ctx.push_error((
                         format!("case expression support is not enabled (did you mean to add `@feature(case_expr)'?)"),
                         expr.span
                     ));
                 };
 
-                analyze_cases(val, cases, get_expression_symbols, features, tdt, symbols, expected_return, errors);
+                analyze_cases(val, cases, get_expression_symbols, ctx, symbols);
             };
 
             let result_type = if let Some(expected_type) = expected_type {
@@ -1004,12 +1023,9 @@ fn do_analyze_expression(
                 for c in cases.iter_mut() {
                     let next_result_type = analyze_expression(
                         &mut c.branch,
-                        features,
-                        tdt,
+                        ctx,
                         symbols,
-                        None,
-                        expected_return,
-                        errors
+                        None
                     );
 
                     if let Some(next_result_type) = Type::least_upper_bound(&result_type, &next_result_type) {
@@ -1038,15 +1054,12 @@ fn do_analyze_expression(
                 for c in cases.iter_mut() {
                     analyze_expression(
                         &mut c.branch,
-                        features,
-                        tdt,
+                        ctx,
                         symbols,
-                        Some(&result_type),
-                        expected_return,
-                        errors
+                        Some(&result_type)
                     );
 
-                    expect_convert_exact!(tdt, errors, c.branch, &result_type);
+                    expect_convert_exact!(ctx, c.branch, &result_type);
                 };
             };
 
@@ -1057,18 +1070,15 @@ fn do_analyze_expression(
 
 fn analyze_expression(
     expr: &mut ast::Expr,
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
+    ctx: &AnalysisContext,
     symbols: &Rc<RefCell<SymbolTable>>,
-    expected_type: Option<&Type>,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    expected_type: Option<&Type>
 ) -> Type {
     if expr.val_type.is_resolved() {
         return expr.val_type.clone();
     };
 
-    expr.val_type = do_analyze_expression(expr, features, tdt, symbols, expected_type, expected_return, errors);
+    expr.val_type = do_analyze_expression(expr, ctx, symbols, expected_type);
     expr.val_type.clone()
 }
 
@@ -1090,35 +1100,32 @@ fn get_statement_symbols(
 
 fn analyze_statement(
     stmt: &mut ast::Stmt,
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
-    symbols: &Rc<RefCell<SymbolTable>>,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    ctx: &AnalysisContext,
+    symbols: &Rc<RefCell<SymbolTable>>
 ) {
     match stmt.node {
         ast::StmtType::IfThenElse(ref mut cond, ref mut then_stmt, ref mut else_stmt) => {
-            analyze_expression(cond, features, tdt, symbols, Some(&Type::Bool), expected_return, errors);
-            expect_convert_exact!(tdt, errors, cond, &Type::Bool);
+            analyze_expression(cond, ctx, symbols, Some(&Type::Bool));
+            expect_convert_exact!(ctx, cond, &Type::Bool);
 
-            analyze_statement(then_stmt, features, tdt, symbols, expected_return, errors);
+            analyze_statement(then_stmt, ctx, symbols);
 
             if let Some(else_stmt) = else_stmt {
-                analyze_statement(else_stmt, features, tdt, symbols, expected_return, errors);
+                analyze_statement(else_stmt, ctx, symbols);
                 stmt.will_return = then_stmt.will_return && else_stmt.will_return;
-            } else if !features.contains_key("optional_else") {
-                errors.push(missing_else!(stmt.span));
+            } else if !ctx.features.contains_key("optional_else") {
+                ctx.push_error(missing_else!(stmt.span));
             };
         },
         ast::StmtType::WhileDo(ref mut cond, ref mut do_stmt) => {
-            analyze_expression(cond, features, tdt, symbols, Some(&Type::Bool), expected_return, errors);
-            expect_convert_exact!(tdt, errors, cond, &Type::Bool);
+            analyze_expression(cond, ctx, symbols, Some(&Type::Bool));
+            expect_convert_exact!(ctx, cond, &Type::Bool);
 
-            analyze_statement(do_stmt, features, tdt, symbols, expected_return, errors);
+            analyze_statement(do_stmt, ctx, symbols);
             stmt.will_return = if let ast::ExprType::Bool(true) = cond.node { true } else { false };
         },
         ast::StmtType::Read(ref mut loc) => {
-            let val_type = analyze_expression(loc, features, tdt, symbols, None, expected_return, errors);
+            let val_type = analyze_expression(loc, ctx, symbols, None);
             let is_valid = match val_type {
                 Type::Bool => true,
                 Type::Char => true,
@@ -1129,27 +1136,27 @@ fn analyze_statement(
             };
 
             if !loc.assignable {
-                errors.push(cannot_assign!(loc));
+                ctx.push_error(cannot_assign!(loc));
             } else if !is_valid {
-                errors.push(cannot_read!(tdt, loc));
+                ctx.push_error(cannot_read!(ctx, loc));
             };
         },
         ast::StmtType::Assign(ref mut loc, ref mut val) => {
-            let expected_type = analyze_expression(loc, features, tdt, symbols, None, expected_return, errors);
-            analyze_expression(val, features, tdt, symbols, if expected_type.is_resolved() {
+            let expected_type = analyze_expression(loc, ctx, symbols, None);
+            analyze_expression(val, ctx, symbols, if expected_type.is_resolved() {
                 Some(&expected_type)
             } else {
                 None
-            }, expected_return, errors);
+            });
 
             if !loc.assignable {
-                errors.push(cannot_assign!(loc));
+                ctx.push_error(cannot_assign!(loc));
             } else {
-                expect_convert_exact!(tdt, errors, val, &expected_type);
+                expect_convert_exact!(ctx, val, &expected_type);
             };
         },
         ast::StmtType::Print(ref mut val) => {
-            let val_type = analyze_expression(val, features, tdt, symbols, None, expected_return, errors);
+            let val_type = analyze_expression(val, ctx, symbols, None);
             let is_valid = match val_type {
                 Type::Bool => true,
                 Type::Char => true,
@@ -1160,7 +1167,7 @@ fn analyze_statement(
             };
 
             if !is_valid {
-                errors.push(cannot_print!(tdt, val));
+                ctx.push_error(cannot_print!(ctx, val));
             };
         },
         ast::StmtType::Block(ref mut inner_block) => {
@@ -1168,27 +1175,27 @@ fn analyze_statement(
                 inner_block.symbols.borrow_mut().set_parent(symbols.clone());
             };
 
-            populate_block_symbol_table(features, tdt, inner_block, expected_return, errors);
+            populate_block_symbol_table(inner_block, ctx);
 
             stmt.will_return = inner_block.stmts.iter().any(|s| s.will_return);
         },
         ast::StmtType::Case(ref mut val, ref mut cases) => {
-            analyze_cases(val, cases, get_statement_symbols, features, tdt, symbols, expected_return, errors);
+            analyze_cases(val, cases, get_statement_symbols, ctx, symbols);
 
             for case in cases.iter_mut() {
-                analyze_statement(&mut case.branch, features, tdt, symbols, expected_return, errors);
+                analyze_statement(&mut case.branch, ctx, symbols);
             };
 
-            stmt.will_return = val.val_type.are_cases_exhaustive(tdt, cases)
+            stmt.will_return = val.val_type.are_cases_exhaustive(ctx.tdt, cases)
                 && cases.iter().all(|c| c.branch.will_return);
         },
         ast::StmtType::Return(ref mut val) => {
-            analyze_expression(val, features, tdt, symbols, expected_return, expected_return, errors);
+            analyze_expression(val, ctx, symbols, ctx.expected_return);
 
-            if let Some(expected_return) = expected_return {
-                expect_convert_exact!(tdt, errors, val, expected_return);
+            if let Some(expected_return) = ctx.expected_return {
+                expect_convert_exact!(ctx, val, expected_return);
             } else {
-                errors.push(cannot_return_outside_func!(stmt.span));
+                ctx.push_error(cannot_return_outside_func!(stmt.span));
             };
 
             stmt.will_return = true;
@@ -1197,11 +1204,8 @@ fn analyze_statement(
 }
 
 fn populate_block_symbol_table(
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
     block: &mut ast::Block,
-    expected_return: Option<&Type>,
-    errors: &mut Vec<(String, Span)>
+    ctx: &AnalysisContext
 ) {
     {
         let symbols = &mut block.symbols.borrow_mut();
@@ -1214,9 +1218,9 @@ fn populate_block_symbol_table(
         // processed until after all declarations have been processed.
         for decl in &mut block.decls {
             if let ast::DeclType::Data(ref name, ref mut type_id, _) = decl.node {
-                *type_id = tdt.add_dummy_definition();
+                *type_id = ctx.tdt.add_dummy_definition();
                 if let Some((_, old_type_span)) = symbols.find_imm_named_type(&name) {
-                    errors.push(type_already_defined!(name, decl.span, old_type_span));
+                    ctx.push_error(type_already_defined!(name, decl.span, old_type_span));
                 } else {
                     symbols.add_type(name.clone(), *type_id, decl.span);
                 };
@@ -1224,60 +1228,53 @@ fn populate_block_symbol_table(
         };
 
         for decl in mem::replace(&mut block.decls, vec![]) {
-            create_symbol_for_decl(tdt, symbols, errors, decl);
+            create_symbol_for_decl(decl, ctx, symbols);
         };
     };
 
-    {
-        for (_, sym) in &block.symbols.borrow().symbols {
-            match sym.node {
-                SymbolType::Fun(ref fs) => {
-                    populate_function_symbol_table(features, tdt, &block.symbols, &fs, &sym.span, errors);
-                },
-                SymbolType::Var(ref vs) => {
-                    for d in vs.dims.borrow_mut().iter_mut() {
-                        analyze_expression(d, features, tdt, &block.symbols, Some(&Type::Int), expected_return, errors);
-                        expect_convert_exact!(tdt, errors, d, &Type::Int);
-                    };
-                },
-                _ => {}
-            };
+    for (_, sym) in &block.symbols.borrow().symbols {
+        match sym.node {
+            SymbolType::Fun(ref fs) => {
+                populate_function_symbol_table(&fs, &sym.span, ctx, &block.symbols);
+            },
+            SymbolType::Var(ref vs) => {
+                for d in vs.dims.borrow_mut().iter_mut() {
+                    analyze_expression(d, ctx, &block.symbols, Some(&Type::Int));
+                    expect_convert_exact!(ctx, d, &Type::Int);
+                };
+            },
+            _ => {}
         };
     };
 
     for stmt in &mut block.stmts {
-        analyze_statement(stmt, features, tdt, &block.symbols, expected_return, errors);
+        analyze_statement(stmt, ctx, &block.symbols);
     };
 }
 
 fn populate_function_symbol_table(
-    features: &HashMap<String, Span>,
-    tdt: &TypeDefinitionTable,
-    parent: &Rc<RefCell<SymbolTable>>,
     sym: &FunSymbol,
     span: &Span,
-    errors: &mut Vec<(String, Span)>
+    ctx: &AnalysisContext,
+    parent_symbols: &Rc<RefCell<SymbolTable>>,
 ) {
     let block = &mut sym.body.borrow_mut();
-    let return_type = if let TypeDefinition::Function(ref sig) = tdt.get_definition(sym.sig) {
+    let return_type = if let TypeDefinition::Function(ref sig) = ctx.tdt.get_definition(sym.sig) {
         sig.return_type.clone()
     } else {
         panic!("Invalid function signature")
     };
 
-    block.symbols.borrow_mut().set_parent(parent.clone());
+    block.symbols.borrow_mut().set_parent(parent_symbols.clone());
 
     populate_block_symbol_table(
-        features,
-        tdt,
         block,
-        Some(&return_type),
-        errors
+        &ctx.with_expected_return(Some(&return_type))
     );
 
-    if features.contains_key("return_anywhere") {
+    if ctx.features.contains_key("return_anywhere") {
         if !block.stmts.iter().any(|s| s.will_return) {
-            errors.push(missing_return_anywhere!(*span));
+            ctx.push_error(missing_return_anywhere!(*span));
         };
     } else {
         let has_final_return = if let Some(ast::StmtType::Return(_)) = block.stmts.last().map(|s| &s.node) {
@@ -1287,41 +1284,41 @@ fn populate_function_symbol_table(
         };
 
         if !has_final_return {
-            errors.push(missing_return_at_end!(*span));
+            ctx.push_error(missing_return_at_end!(*span));
         } else {
-            fn check_no_return(s: &ast::Stmt, errors: &mut Vec<(String, Span)>) -> () {
+            fn check_no_return(s: &ast::Stmt, ctx: &AnalysisContext) -> () {
                 use ast::StmtType::*;
 
                 match s.node {
                     IfThenElse(_, ref then_stmt, ref else_stmt) => {
-                        check_no_return(then_stmt, errors);
+                        check_no_return(then_stmt, ctx);
 
                         if let Some(else_stmt) = else_stmt {
-                            check_no_return(else_stmt, errors);
+                            check_no_return(else_stmt, ctx);
                         };
                     },
                     WhileDo(_, ref do_stmt) => {
-                        check_no_return(do_stmt, errors);
+                        check_no_return(do_stmt, ctx);
                     },
                     Block(ref block) => {
                         for s in &block.stmts {
-                            check_no_return(s, errors);
+                            check_no_return(s, ctx);
                         };
                     },
                     Case(_, ref cases) => {
                         for c in cases {
-                            check_no_return(&c.branch, errors);
+                            check_no_return(&c.branch, ctx);
                         };
                     },
                     Return(_) => {
-                        errors.push(cannot_return_except_at_end!(s.span));
+                        ctx.push_error(cannot_return_except_at_end!(s.span));
                     },
                     _ => {}
                 };
             }
 
             for s in &block.stmts[..(block.stmts.len() - 1)] {
-                check_no_return(s, errors);
+                check_no_return(s, ctx);
             };
         };
     };
@@ -1341,10 +1338,7 @@ pub fn populate_symbol_tables(
     };
 
     populate_block_symbol_table(
-        &program.features,
-        &mut program.types,
         &mut program.block,
-        None,
-        errors
+        &AnalysisContext::new(&program.types, &program.features, None, errors)
     );
 }
