@@ -276,6 +276,20 @@ macro_rules! missing_else {
     ))
 }
 
+macro_rules! block_expr_disabled {
+    ($span:expr) => ((
+        format!("block expression support is not enabled (did you mean to add `@feature(block_expr)'?)"),
+        $span
+    ))
+}
+
+macro_rules! block_expr_has_no_value {
+    ($span:expr) => ((
+        "this block expression has no value and does not always return".to_string(),
+        $span
+    ))
+}
+
 struct AnalysisContext<'a, 'b> where 'b: 'a {
     tdt: &'a TypeDefinitionTable,
     sdt: &'a SymbolDefinitionTable,
@@ -970,10 +984,7 @@ fn do_analyze_expression(
         ast::ExprType::Block(ref mut block, ref mut result) => {
             if expr.val_type == Type::Unknown {
                 if !expr.synthetic && !ctx.features.contains_key("block_expr") {
-                    ctx.push_error((
-                        format!("block expression support is not enabled (did you mean to add `@feature(block_expr)'?)"),
-                        expr.span
-                    ));
+                    ctx.push_error(block_expr_disabled!(expr.span));
                 };
 
                 {
@@ -997,20 +1008,14 @@ fn do_analyze_expression(
             } else if block.stmts.iter().any(|s| s.will_return) {
                 return Type::Never;
             } else {
-                ctx.push_error((
-                    "this block expression has no value and does not always return".to_string(),
-                    expr.span
-                ));
+                ctx.push_error(block_expr_has_no_value!(expr.span));
                 return Type::Error;
             };
         },
         ast::ExprType::Case(ref mut val, ref mut cases) => {
             if expr.val_type == Type::Unknown {
                 if !expr.synthetic && !ctx.features.contains_key("case_expr") {
-                    ctx.push_error((
-                        format!("case expression support is not enabled (did you mean to add `@feature(case_expr)'?)"),
-                        expr.span
-                    ));
+                    ctx.push_error(case_expr_disabled!(expr.span));
                 };
 
                 analyze_cases(val, cases, get_expression_symbols, ctx, symbols);
