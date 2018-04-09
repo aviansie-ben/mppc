@@ -419,6 +419,8 @@ fn create_symbol_for_decl(
                 symbols.add_ctor(ctor.name.clone(), (type_id, i));
             };
 
+            // We don't need to perform error-checking when defining the type, since that is already
+            // handled when we created the dummy definitions for the data types earlier.
             ctx.tdt.define_type(type_id, TypeDefinition::Data(type_def));
         },
         ast::DeclType::Fun(name, sig, body) => {
@@ -448,6 +450,10 @@ fn create_symbol_for_decl(
                     }
                 }
 
+                // We need to examine the previously defined symbol in detail to determine whether
+                // or not this new declaration conflicts with the old one. This is because two
+                // functions can have the same name as long as their signatures (except the return
+                // values) are different.
                 let old_sym = ctx.sdt.get_symbol(old_sym);
                 let conflict_sym = match old_sym.node {
                     SymbolType::Fun(ref f) => if does_sig_conflict(ctx.tdt, &params, f.sig) {
@@ -463,6 +469,8 @@ fn create_symbol_for_decl(
                     _ => Some(old_sym)
                 };
 
+                // If a conflicting symbol was found, determine the correct error message to print
+                // depending on whether the previous definition was a function or something else.
                 if let Some(conflict_sym) = conflict_sym {
                     if let SymbolType::Fun(_) = conflict_sym.node {
                         ctx.push_error(function_definition_conflict!(decl, conflict_sym));
@@ -477,6 +485,8 @@ fn create_symbol_for_decl(
                 true
             };
 
+            // Pre-create symbols for the function parameters. These will be added to the correct
+            // symbol tables alongside the symbol for the new function.
             let params: Vec<_> = sig.params.into_iter().map(|p| Symbol::new(
                 0,
                 p.id,
@@ -487,6 +497,8 @@ fn create_symbol_for_decl(
                 ctx.function_id
             )).collect();
 
+            // Only actually add the symbol if there were no conflicts. If there were conflicts, the
+            // function declaration is type-checked but no symbol is actually added.
             if define {
                 ctx.sdt.add_named_function_symbol(symbols, Symbol::new(
                     0,
@@ -565,6 +577,8 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         ctx: &AnalysisContext,
         symbols: &Rc<RefCell<SymbolTable>>
     ) {
+        // Something went wrong during type-checking. However, we still want the variables to be
+        // declared on the branch to avoid further errors when examining the branch.
         let sub_symbols = &mut get_symbols(&mut case.branch).borrow_mut();
         sub_symbols.set_parent(symbols.clone());
 
@@ -593,6 +607,8 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         ctx: &AnalysisContext,
         symbols: &Rc<RefCell<SymbolTable>>
     ) {
+        // Begin by trying to find the named constructor and doing some very basic validation. If
+        // anything fails, fall back to analyze_case_error.
         let (ctor_id, ctor) = if let Some(ctor) = typedef.ctors.iter().enumerate().find(|&(_, ctor)| ctor.name == case.cid) {
             ctor
         } else {
@@ -611,6 +627,8 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
             return;
         };
 
+        // Now that we know what types each of the variables we've matched should be, we can go
+        // through and declare them on the branch's symbol table.
         let sub_symbols = &mut get_symbols(&mut case.branch).borrow_mut();
         sub_symbols.set_parent(symbols.clone());
 
@@ -632,35 +650,37 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
         };
     }
 
-    {
-        let val_type = analyze_expression(val, ctx, symbols, None);
-        let typedef = if let Type::Defined(ref type_id) = val_type {
-            if let TypeDefinition::Data(ref typedef) = ctx.tdt.get_definition(*type_id) {
-                Some(typedef)
-            } else {
-                None
-            }
+    // Begin by examining the value we'll be pattern matching against. Then, try to unwrap that type
+    // into its underlying data type definition, which we'll need to validate the constructors.
+    let val_type = analyze_expression(val, ctx, symbols, None);
+    let typedef = if let Type::Defined(ref type_id) = val_type {
+        if let TypeDefinition::Data(ref typedef) = ctx.tdt.get_definition(*type_id) {
+            Some(typedef)
         } else {
             None
+        }
+    } else {
+        None
+    };
+
+    // Check that the type we found was a data type and then go through, analyzing each of the
+    // branches and checking for any duplicates.
+    if let Some(typedef) = typedef {
+        let mut handled_cases: Vec<(usize, Span)> = Vec::new();
+        for case in cases.iter_mut() {
+            analyze_case(case, typedef, &get_symbols, ctx, symbols);
+
+            if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
+                ctx.push_error(duplicate_case!(case.cid, case.span, prev_span));
+            } else {
+                handled_cases.push((case.ctor_id, case.span));
+            };
         };
+    } else {
+        ctx.push_error(cannot_pattern_match!(ctx, val));
 
-        if let Some(typedef) = typedef {
-            let mut handled_cases: Vec<(usize, Span)> = Vec::new();
-            for case in cases.iter_mut() {
-                analyze_case(case, typedef, &get_symbols, ctx, symbols);
-
-                if let Some((_, prev_span)) = handled_cases.iter().find(|&&(id, _)| id == case.ctor_id) {
-                    ctx.push_error(duplicate_case!(case.cid, case.span, prev_span));
-                } else {
-                    handled_cases.push((case.ctor_id, case.span));
-                };
-            };
-        } else {
-            ctx.push_error(cannot_pattern_match!(ctx, val));
-
-            for case in cases.iter_mut() {
-                analyze_case_error(case, &get_symbols, ctx, symbols);
-            };
+        for case in cases.iter_mut() {
+            analyze_case_error(case, &get_symbols, ctx, symbols);
         };
     };
 }
@@ -668,6 +688,10 @@ fn analyze_cases<T, U: Fn (&mut T) -> &Rc<RefCell<SymbolTable>>>(
 fn get_expression_symbols(
     expr: &mut ast::Expr
 ) -> &Rc<RefCell<SymbolTable>> {
+    // Sometimes, we need to be able to add symbols to an arbitrary expression. To do this, we need
+    // to turn the expression into a block expression if it wasn't already. We also mark it as
+    // "synthetic" to avoid the analyzer complaining about a missing @feature(block_expr) annotation
+    // later.
     if let ast::ExprType::Block(ref block, _) = expr.node {
         return &block.symbols;
     };
@@ -700,6 +724,8 @@ fn do_analyze_expression(
                 return Type::Error;
             };
 
+            // Look through the available binary operator implementations and try to find one which
+            // is applicable to the given types.
             let op_impl = if let Some(impls) = BINARY_OPS.get(&op) {
                 let valid_impls = get_valid_call_signatures(
                     &val_types,
@@ -717,6 +743,8 @@ fn do_analyze_expression(
                 None
             };
 
+            // If a valid implementation was found, complete the analysis of the sub-expressions to
+            // resolve any ambiguous references.
             if let Some(&(ref params, ref result, op)) = op_impl {
                 analyze_expression(lhs, ctx, symbols, Some(&params[0]));
                 analyze_expression(rhs, ctx, symbols, Some(&params[1]));
@@ -735,6 +763,8 @@ fn do_analyze_expression(
                 return Type::Error;
             };
 
+            // Look through the available unary operator implementations and try to find one which
+            // is applicable to the given type.
             let op_impl = if let Some(impls) = UNARY_OPS.get(&op) {
                 let valid_impls = get_valid_call_signatures(
                     &val_types,
@@ -752,6 +782,8 @@ fn do_analyze_expression(
                 None
             };
 
+            // If a valid implementation was found, complete the analysis of the sub-expression to
+            // resolve any ambiguous references.
             if let Some(&(ref params, ref result, op)) = op_impl {
                 analyze_expression(val, ctx, symbols, Some(&params[0]));
                 *sym_op = op;
@@ -781,8 +813,14 @@ fn do_analyze_expression(
                 name: &str,
                 expected_type: Option<&Type>
             ) -> Option<&'a Symbol> {
+                // First, try to simply look up the symbol in the symbol table.
                 if let Some(sym) = symbols.find_named_symbol(name) {
                     let sym = ctx.sdt.get_symbol(sym);
+
+                    // If the symbol was a multi-function and we know what type of function is
+                    // expected, resolve the reference. Otherwise, keep the reference ambiguous and
+                    // let a higher-level analysis routine take care of resolving the ambiguity and
+                    // calling this routine again with an expected type.
                     if let SymbolType::MultiFun(ref mf) = sym.node {
                         if let Some(&Type::Defined(expected_type)) = expected_type {
                             mf.funcs.borrow().iter()
@@ -801,6 +839,9 @@ fn do_analyze_expression(
 
             let symbols_borrow = &symbols.borrow();
             if let Some(sym) = resolve_symbol(ctx, symbols_borrow, name, expected_type) {
+                // If the symbol is not local to the current function, set a flag saying the
+                // variable has references from outside of the function in which it is declared.
+                // This is used to suppress unsafe optimizations on these symbols.
                 if sym.defining_fun != ctx.function_id {
                     sym.has_nonlocal_references.set(true);
                 };
@@ -819,6 +860,9 @@ fn do_analyze_expression(
                 t: &Type,
                 tdt: &'a TypeDefinitionTable
             ) -> Vec<(usize, &'a FunctionTypeDefinition)> {
+                // Look through the given type and unwrap all available function signatures. If
+                // multiple are returned, the caller will need to perform disambiguation and then
+                // re-analyze the function expression.
                 match *t {
                     Type::Defined(type_id) => {
                         if let TypeDefinition::Function(ref typedef) = tdt.get_definition(type_id) {
@@ -844,6 +888,8 @@ fn do_analyze_expression(
                 }
             }
 
+            // First, perform a loose analysis of the function and arguments to determine which
+            // types they could potentially be.
             let func_type = analyze_expression(func, ctx, symbols, None);
 
             if expr.val_type == Type::Unknown {
@@ -855,12 +901,18 @@ fn do_analyze_expression(
             let typedefs = get_function_typedefs(&func_type, ctx.tdt);
 
             if typedefs.len() == 0 {
+                // If the number of valid call signatures was 0, then the provided expression cannot
+                // be called.
                 ctx.push_error(cannot_call!(ctx, func, expr.span));
                 return Type::Error;
             } else if typedefs.len() == 1 {
+                // If there is only one valid call signature, just go through the analysis of the
+                // arguments assuming that's the one we want.
                 analyze_call_signature(&expr.span, &typedefs[0].1.params, params, ctx, symbols);
                 return typedefs[0].1.return_type.clone();
             } else {
+                // If there are multiple valid call signatures, we need to disambiguate which of
+                // them should be used for this call.
                 let param_types: Vec<_> = params.iter_mut()
                     .map(|p| analyze_expression(p, ctx, symbols, None))
                     .collect();
@@ -869,6 +921,8 @@ fn do_analyze_expression(
                     typedefs.iter().map(|&(_, td)| &td.params[..])
                 );
 
+                // Now, we go through the same analysis as above again, only looking at the set of
+                // call signatures which matched the arguments.
                 if valid_typedefs.len() == 0 {
                     ctx.push_error(no_function_match!(ctx, params, typedefs, expr.span));
                     return Type::Error;
@@ -901,6 +955,8 @@ fn do_analyze_expression(
             expect_convert_exact!(ctx, index, &Type::Int);
 
             if let Type::Array(inner_type, dims) = val_type {
+                // We can only assign values to an array once we have fully dereferenced it, so set
+                // the assignability of the expression and the type accordingly.
                 return if dims == 1 {
                     expr.assignable = true;
                     *inner_type
@@ -920,6 +976,7 @@ fn do_analyze_expression(
                 };
             };
 
+            // First, go through and find the list of constructors with the given name
             let symbols_borrow = &symbols.borrow();
             let ctors = if let Some(ctors) = symbols_borrow.find_ctors(name) {
                 ctors
@@ -929,6 +986,7 @@ fn do_analyze_expression(
             };
 
             if ctors.len() == 1 {
+                // If there was only one, analyze assuming that's the one we want to use.
                 let ctor_id = ctors[0];
                 let ctor = match ctx.tdt.get_definition(ctor_id.0) {
                     TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
@@ -939,6 +997,8 @@ fn do_analyze_expression(
                 *expr_ctor_id = ctor_id.1;
                 return Type::Defined(ctor_id.0);
             } else {
+                // If there are multiple, but we know what the expected type of this expression was,
+                // then analyze using the correct one.
                 if let Some(Type::Defined(expected_type)) = expected_type {
                     let ctor_id = ctors.iter().find(|ctor_id| &ctor_id.0 == expected_type);
 
@@ -954,6 +1014,8 @@ fn do_analyze_expression(
                     };
                 };
 
+                // Otherwise, examine the list of constructors to see which ones match the types of
+                // the number of arguments we have.
                 let valid_ctors: Vec<_> = ctors.iter().map(|ctor_id| {
                     let ctor = match ctx.tdt.get_definition(ctor_id.0) {
                         TypeDefinition::Data(ref td) => &td.ctors[ctor_id.1],
@@ -963,6 +1025,8 @@ fn do_analyze_expression(
                     (ctor, *ctor_id)
                 }).filter(|(ctor, _)| ctor.args.len() == params.len()).collect();
 
+                // If there is only 1 valid constructor, or no valid constructors at all, we can
+                // stop disambiguation early.
                 if valid_ctors.len() == 0 {
                     let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
 
@@ -976,6 +1040,8 @@ fn do_analyze_expression(
                     return Type::Defined(ctor_id.0);
                 }
 
+                // Otherwise, we look at the types of the arguments to determine which constructor
+                // should be used.
                 let param_types: Vec<_> = params.iter().map(|p| p.val_type.clone()).collect();
                 let valid_ctors: Vec<_> = valid_ctors.iter().filter(|&&(ctor, _)| {
                     for (et, at) in ctor.args.iter().zip(param_types.iter()) {
@@ -995,6 +1061,8 @@ fn do_analyze_expression(
                     *expr_ctor_id = ctor_id.1;
                     return Type::Defined(ctor_id.0);
                 } else {
+                    // If we still can't determine which constructor to use, then it's up to the
+                    // higher-level analyzer to tell us what type it's expecting.
                     return Type::union(valid_ctors.into_iter().map(|&(_, (type_id, _))| {
                         Type::Defined(type_id)
                     }));
@@ -1006,6 +1074,10 @@ fn do_analyze_expression(
         ast::ExprType::Bool(_) => return Type::Bool,
         ast::ExprType::Char(_) => return Type::Char,
         ast::ExprType::Block(ref mut block, ref mut result) => {
+            // Contrary to the way that expressions work, examining blocks multiple times can have
+            // bad consequences. A good way to check if this is the first time we're examining this
+            // expression is to check whether the type is Type::Unknown. The type should only ever
+            // have that value on the first analysis.
             if expr.val_type == Type::Unknown {
                 if !expr.synthetic && !ctx.features.contains_key("block_expr") {
                     ctx.push_error(block_expr_disabled!(expr.span));
@@ -1022,6 +1094,8 @@ fn do_analyze_expression(
                 populate_block_symbol_table(block, ctx);
             };
 
+            // Now that the block has been examined, we can just pass analysis through to the
+            // expression we want to use as the result.
             if let Some(result) = result {
                 return analyze_expression(
                     result,
@@ -1037,14 +1111,24 @@ fn do_analyze_expression(
             };
         },
         ast::ExprType::Case(ref mut val, ref mut cases) => {
+            // Again, we only want to examine the actual case expression itself once, so we check
+            // whether we're performing the first analysis here.
             if expr.val_type == Type::Unknown {
                 if !expr.synthetic && !ctx.features.contains_key("case_expr") {
                     ctx.push_error(case_expr_disabled!(expr.span));
                 };
 
                 analyze_cases(val, cases, get_expression_symbols, ctx, symbols);
+
+                if !val.val_type.are_cases_exhaustive(ctx.tdt, cases) {
+                    ctx.push_error(case_expr_not_exhaustive!(expr.span));
+                };
             };
 
+            // Once the cases have been examined, we want to examine the expressions on each of the
+            // branches and try to find the type to which they should all be converted. If we know
+            // what type this expression should be, we can just use that straight away. Otherwise,
+            // we need to examine the possible types and find their least upper bound.
             let result_type = if let Some(expected_type) = expected_type {
                 expected_type.clone()
             } else {
@@ -1080,10 +1164,8 @@ fn do_analyze_expression(
                 }
             };
 
-            if !val.val_type.are_cases_exhaustive(ctx.tdt, cases) {
-                ctx.push_error(case_expr_not_exhaustive!(expr.span));
-            };
-
+            // If we found a valid type to convert everything to, go through and finalize the
+            // analysis of each of the branches.
             if result_type.is_resolved() {
                 for c in cases.iter_mut() {
                     analyze_expression(
@@ -1119,6 +1201,10 @@ fn analyze_expression(
 fn get_statement_symbols(
     stmt: &mut ast::Stmt
 ) -> &Rc<RefCell<SymbolTable>> {
+    // Sometimes, we need to add symbols to an arbitrary statement. However, only block statements
+    // have an associated symbol table. Thus, we need to turn any non-block statements into block
+    // statements so that we can access their symbol table.
+
     if let ast::StmtType::Block(ref block) = stmt.node {
         return &block.symbols;
     };
@@ -1266,6 +1352,9 @@ fn populate_block_symbol_table(
         };
     };
 
+    // Now that all symbols are fully declared, we can start examining any embedded expressions or
+    // statements for these symbols. This means that function bodies and array dimensions are fully
+    // examined at this point.
     for (_, &sym) in &block.symbols.borrow().symbol_names {
         let sym = ctx.sdt.get_symbol(sym);
         match sym.node {
@@ -1308,6 +1397,10 @@ fn populate_function_symbol_table(
         &ctx.inside_function(id, Some(&return_type))
     );
 
+    // If an @feature(return_anywhere) annotation is present, then we allow return statements
+    // anywhere inside the function body, so long as the function is guaranteed to always return.
+    // Otherwise, we need to check that the last statement is a return statement and that none of
+    // other statements in the function are return statements.
     if ctx.features.contains_key("return_anywhere") {
         if !block.stmts.iter().any(|s| s.will_return) {
             ctx.push_error(missing_return_anywhere!(*span));
