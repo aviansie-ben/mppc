@@ -117,20 +117,31 @@ pub enum IlInstruction {
     MulInt(IlRegister, IlOperand, IlOperand),
     DivInt(IlRegister, IlOperand, IlOperand),
     LogicNotInt(IlRegister, IlOperand),
+    AddFloat(IlRegister, IlOperand, IlOperand),
+    SubFloat(IlRegister, IlOperand, IlOperand),
+    MulFloat(IlRegister, IlOperand, IlOperand),
+    DivFloat(IlRegister, IlOperand, IlOperand),
 
     EqInt(IlRegister, IlOperand, IlOperand),
     LtInt(IlRegister, IlOperand, IlOperand),
     GtInt(IlRegister, IlOperand, IlOperand),
     LeInt(IlRegister, IlOperand, IlOperand),
     GeInt(IlRegister, IlOperand, IlOperand),
+    EqFloat(IlRegister, IlOperand, IlOperand),
+    LtFloat(IlRegister, IlOperand, IlOperand),
+    GtFloat(IlRegister, IlOperand, IlOperand),
+    LeFloat(IlRegister, IlOperand, IlOperand),
+    GeFloat(IlRegister, IlOperand, IlOperand),
 
     PrintInt(IlOperand),
     PrintBool(IlOperand),
     PrintChar(IlOperand),
+    PrintFloat(IlOperand),
 
     ReadInt(IlRegister),
     ReadBool(IlRegister),
     ReadChar(IlRegister),
+    ReadFloat(IlRegister),
 
     Nop
 }
@@ -181,6 +192,22 @@ impl IlInstruction {
                 f(o2);
             },
             LogicNotInt(_, ref mut o) => f(o),
+            AddFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            SubFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            MulFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            DivFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
             EqInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
@@ -201,12 +228,34 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            EqFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            LtFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            GtFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            LeFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            GeFloat(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
             PrintInt(ref mut o) => f(o),
             PrintBool(ref mut o) => f(o),
             PrintChar(ref mut o) => f(o),
+            PrintFloat(ref mut o) => f(o),
             ReadInt(_) => {},
             ReadBool(_) => {},
             ReadChar(_) => {},
+            ReadFloat(_) => {},
             Nop => {}
         }
     }
@@ -238,6 +287,22 @@ impl IlInstruction {
                 f(o2);
             },
             LogicNotInt(_, ref o) => f(o),
+            AddFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            SubFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            MulFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            DivFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
             EqInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
@@ -258,12 +323,34 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            EqFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            LtFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            GtFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            LeFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            GeFloat(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
             PrintInt(ref o) => f(o),
             PrintBool(ref o) => f(o),
             PrintChar(ref o) => f(o),
+            PrintFloat(ref o) => f(o),
             ReadInt(_) => {},
             ReadBool(_) => {},
             ReadChar(_) => {},
+            ReadFloat(_) => {},
             Nop => {}
         }
     }
@@ -281,17 +368,28 @@ impl IlInstruction {
             MulInt(r, _, _) => Some(r),
             DivInt(r, _, _) => Some(r),
             LogicNotInt(r, _) => Some(r),
+            AddFloat(r, _, _) => Some(r),
+            SubFloat(r, _, _) => Some(r),
+            MulFloat(r, _, _) => Some(r),
+            DivFloat(r, _, _) => Some(r),
             EqInt(r, _, _) => Some(r),
             LtInt(r, _, _) => Some(r),
             GtInt(r, _, _) => Some(r),
             LeInt(r, _, _) => Some(r),
             GeInt(r, _, _) => Some(r),
+            EqFloat(r, _, _) => Some(r),
+            LtFloat(r, _, _) => Some(r),
+            GtFloat(r, _, _) => Some(r),
+            LeFloat(r, _, _) => Some(r),
+            GeFloat(r, _, _) => Some(r),
             PrintInt(_) => None,
             PrintBool(_) => None,
             PrintChar(_) => None,
+            PrintFloat(_) => None,
             ReadInt(r) => Some(r),
             ReadBool(r) => Some(r),
             ReadChar(r) => Some(r),
+            ReadFloat(r) => Some(r),
             Nop => None
         }
     }
@@ -306,14 +404,24 @@ impl IlInstruction {
             MulInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             DivInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             LogicNotInt(ref mut old_target, _) => mem::replace(old_target, target),
+            AddFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            SubFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            MulFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            DivFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             EqInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             LtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             GtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             LeInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             GeInt(ref mut old_target, _, _) => mem::replace(old_target, target),
+            EqFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            LtFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            GtFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            LeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            GeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             ReadInt(ref mut old_target) => mem::replace(old_target, target),
             ReadBool(ref mut old_target) => mem::replace(old_target, target),
             ReadChar(ref mut old_target) => mem::replace(old_target, target),
+            ReadFloat(ref mut old_target) => mem::replace(old_target, target),
             _ => panic!("Attempt to relink target register of non-writing instruction {}", self)
         };
     }
@@ -328,9 +436,11 @@ impl IlInstruction {
             PrintInt(_) => true,
             PrintBool(_) => true,
             PrintChar(_) => true,
+            PrintFloat(_) => true,
             ReadInt(_) => true,
             ReadBool(_) => true,
             ReadChar(_) => true,
+            ReadFloat(_) => true,
             _ => false
         }
     }
@@ -358,17 +468,28 @@ impl fmt::Display for IlInstruction {
             MulInt(ref reg, ref lhs, ref rhs) => write!(f, "mul.i32 {} {} {}", reg, lhs, rhs),
             DivInt(ref reg, ref lhs, ref rhs) => write!(f, "div.i32 {} {} {}", reg, lhs, rhs),
             LogicNotInt(ref reg, ref val) => write!(f, "lnot.i32 {} {}", reg, val),
+            AddFloat(ref reg, ref lhs, ref rhs) => write!(f, "add.f64 {} {} {}", reg, lhs, rhs),
+            SubFloat(ref reg, ref lhs, ref rhs) => write!(f, "sub.f64 {} {} {}", reg, lhs, rhs),
+            MulFloat(ref reg, ref lhs, ref rhs) => write!(f, "mul.f64 {} {} {}", reg, lhs, rhs),
+            DivFloat(ref reg, ref lhs, ref rhs) => write!(f, "div.f64 {} {} {}", reg, lhs, rhs),
             EqInt(ref reg, ref lhs, ref rhs) => write!(f, "eq.i32 {} {} {}", reg, lhs, rhs),
             LtInt(ref reg, ref lhs, ref rhs) => write!(f, "lt.i32 {} {} {}", reg, lhs, rhs),
             GtInt(ref reg, ref lhs, ref rhs) => write!(f, "gt.i32 {} {} {}", reg, lhs, rhs),
             LeInt(ref reg, ref lhs, ref rhs) => write!(f, "le.i32 {} {} {}", reg, lhs, rhs),
             GeInt(ref reg, ref lhs, ref rhs) => write!(f, "ge.i32 {} {} {}", reg, lhs, rhs),
+            EqFloat(ref reg, ref lhs, ref rhs) => write!(f, "eq.f64 {} {} {}", reg, lhs, rhs),
+            LtFloat(ref reg, ref lhs, ref rhs) => write!(f, "lt.f64 {} {} {}", reg, lhs, rhs),
+            GtFloat(ref reg, ref lhs, ref rhs) => write!(f, "gt.f64 {} {} {}", reg, lhs, rhs),
+            LeFloat(ref reg, ref lhs, ref rhs) => write!(f, "le.f64 {} {} {}", reg, lhs, rhs),
+            GeFloat(ref reg, ref lhs, ref rhs) => write!(f, "ge.f64 {} {} {}", reg, lhs, rhs),
             PrintInt(ref val) => write!(f, "print.i32 {}", val),
             PrintBool(ref val) => write!(f, "print_b.i32 {}", val),
             PrintChar(ref val) => write!(f, "print_c.i32 {}", val),
+            PrintFloat(ref val) => write!(f, "print.f64 {}", val),
             ReadInt(ref reg) => write!(f, "read.i32 {}", reg),
             ReadBool(ref reg) => write!(f, "read_b.i32 {}", reg),
             ReadChar(ref reg) => write!(f, "read_c.i32 {}", reg),
+            ReadFloat(ref reg) => write!(f, "read.f64 {}", reg),
             Nop => write!(f, "nop")
         }
     }

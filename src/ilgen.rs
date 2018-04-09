@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use ast;
-use il::{BasicBlock, FlowGraph, IlConst, IlInstruction, IlOperand, IlRegister, IlType, Program};
+use il::{BasicBlock, FlowGraph, IlConst, IlFloat, IlInstruction, IlOperand, IlRegister, IlType, Program};
 use symbol;
 use util::PrettyDisplay;
 
@@ -22,6 +22,7 @@ fn translate_type(
         Int => IlType::Int,
         Bool => IlType::Int,
         Char => IlType::Int,
+        Real => IlType::Float,
         ref t => panic!("unsupported type {}", t)
     }
 }
@@ -119,8 +120,16 @@ fn append_expr_to(
                 BinaryOp::IntGt => block.instrs.push(IlInstruction::GtInt(target, lhs, rhs)),
                 BinaryOp::IntLe => block.instrs.push(IlInstruction::LeInt(target, lhs, rhs)),
                 BinaryOp::IntGe => block.instrs.push(IlInstruction::GeInt(target, lhs, rhs)),
-                BinaryOp::BoolOr | BinaryOp::BoolAnd => unreachable!(),
-                op => panic!("not yet supported: {:?}", op)
+                BinaryOp::RealEq => block.instrs.push(IlInstruction::EqFloat(target, lhs, rhs)),
+                BinaryOp::RealLt => block.instrs.push(IlInstruction::LtFloat(target, lhs, rhs)),
+                BinaryOp::RealGt => block.instrs.push(IlInstruction::GtFloat(target, lhs, rhs)),
+                BinaryOp::RealLe => block.instrs.push(IlInstruction::LeFloat(target, lhs, rhs)),
+                BinaryOp::RealGe => block.instrs.push(IlInstruction::GeFloat(target, lhs, rhs)),
+                BinaryOp::RealAdd => block.instrs.push(IlInstruction::AddFloat(target, lhs, rhs)),
+                BinaryOp::RealSub => block.instrs.push(IlInstruction::SubFloat(target, lhs, rhs)),
+                BinaryOp::RealMul => block.instrs.push(IlInstruction::MulFloat(target, lhs, rhs)),
+                BinaryOp::RealDiv => block.instrs.push(IlInstruction::DivFloat(target, lhs, rhs)),
+                BinaryOp::BoolOr | BinaryOp::BoolAnd | BinaryOp::Unknown => unreachable!()
             };
         },
         UnaryOp(_, ref val, op) => {
@@ -134,6 +143,11 @@ fn append_expr_to(
                     target,
                     val,
                     IlOperand::Const(IlConst::Int(-1))
+                )),
+                UnaryOp::RealNeg => block.instrs.push(IlInstruction::MulFloat(
+                    target,
+                    val,
+                    IlOperand::Const(IlConst::Float(IlFloat::from_f64(-1.0)))
                 )),
                 op => panic!("not yet supported: {:?}", op)
             }
@@ -177,6 +191,12 @@ fn append_expr_to(
         },
         Char(val) => {
             block.instrs.push(IlInstruction::Copy(target, IlOperand::Const(IlConst::Int(val as i32))));
+        },
+        Real(val) => {
+            block.instrs.push(IlInstruction::Copy(
+                target,
+                IlOperand::Const(IlConst::Float(IlFloat::from_f64(val)))
+            ));
         },
         Block(ref ast_block, ref result) => {
             append_block(ast_block, ctx, block, g, w);
@@ -311,6 +331,7 @@ fn append_stmt(
                 symbol::Type::Int => IlInstruction::ReadInt(reg),
                 symbol::Type::Bool => IlInstruction::ReadBool(reg),
                 symbol::Type::Char => IlInstruction::ReadChar(reg),
+                symbol::Type::Real => IlInstruction::ReadFloat(reg),
                 _ => unreachable!()
             });
 
@@ -332,6 +353,7 @@ fn append_stmt(
                 symbol::Type::Int => IlInstruction::PrintInt(IlOperand::Register(val_reg)),
                 symbol::Type::Bool => IlInstruction::PrintBool(IlOperand::Register(val_reg)),
                 symbol::Type::Char => IlInstruction::PrintChar(IlOperand::Register(val_reg)),
+                symbol::Type::Real => IlInstruction::PrintFloat(IlOperand::Register(val_reg)),
                 _ => unreachable!()
             });
         },
