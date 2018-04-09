@@ -296,6 +296,13 @@ macro_rules! case_expr_disabled {
     ))
 }
 
+macro_rules! case_expr_not_exhaustive {
+    ($span:expr) => ((
+        format!("case expressions must be exhaustive over the type they match"),
+        $span
+    ))
+}
+
 struct AnalysisContext<'a, 'b> where 'b: 'a {
     function_id: usize,
     tdt: &'a TypeDefinitionTable,
@@ -1071,6 +1078,10 @@ fn do_analyze_expression(
                 } else {
                     result_type
                 }
+            };
+
+            if !val.val_type.are_cases_exhaustive(ctx.tdt, cases) {
+                ctx.push_error(case_expr_not_exhaustive!(expr.span));
             };
 
             if result_type.is_resolved() {
