@@ -826,7 +826,7 @@ impl <'a> Iterator for TypeDefinitionTableIter<'a> {
                 return None;
             } else if let Some(ref def) = defs[*id] {
                 *id = *id + 1;
-                return Some((*id, unsafe { &*(def.as_ref() as *const TypeDefinition) }));
+                return Some((*id - 1, unsafe { &*(def.as_ref() as *const TypeDefinition) }));
             } else {
                 *id = *id + 1;
             };
