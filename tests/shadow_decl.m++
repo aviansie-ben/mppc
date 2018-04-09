@@ -39,6 +39,15 @@
     data x = #NIL | #NIL of x;
 };
 
+% These should conflict
+{
+    fun f(x : int) : bool { return true; };
+    fun f(x : int) : int { return 0; };
+
+    var x : bool;
+    x := f(2);
+};
+
 % These should not conflict
 {
     var x : int;
@@ -49,6 +58,15 @@
 {
     data x = #NIL;
     var x : x;
+};
+
+% These should not conflict and the proper functions should be used
+{
+    fun f(x : int) : bool { return true; };
+    fun f(x : bool) : bool { return false; };
+
+    print f(1);
+    print f(false);
 };
 
 % These should not conflict and the proper constructors should be used
