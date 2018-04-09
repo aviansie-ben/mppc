@@ -1,0 +1,8 @@
+fun f() : bool {
+    while true do {};
+    return true;
+};
+
+% The call to f should never be executed due to short-circuit semantics, so the infinite loop should
+% never be entered.
+print true || f();

@@ -1,0 +1,52 @@
+@feature(return_anywhere)
+@feature(optional_else)
+
+% All of these functions should have an error due to a missing return statement
+
+fun f1(x : int) : int {};
+fun f2(x : int) : int {
+    if x < 0 then {
+        return x;
+    };
+};
+fun f3(x : int) : int {
+    while x < 0 do {
+        return x;
+    };
+};
+fun f4(x : int) : int {
+    data d = #A | #B;
+    case #A of {
+        #A => return x
+    };
+};
+
+% These functions, however, should not have any semantic errors
+fun f5(x : int) : int {
+    if x < 0 then {
+        return x;
+    } else {
+        return -x;
+    };
+};
+fun f6(x : int) : int {
+    if x < 0 then {
+        return x;
+    };
+    return -x;
+};
+fun f7(x : int) : int {
+    while true do {
+        return x;
+    };
+};
+fun f8(x : int) : int {
+    while true do {};
+};
+fun f9(x : int) : int {
+    data d = #A | #B;
+    case #A of {
+        #A => return x |
+        #B => return x + 1
+    };
+};

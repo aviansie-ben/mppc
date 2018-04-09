@@ -1,0 +1,32 @@
+@feature(return_anywhere)
+@feature(optional_else)
+@feature(block_expr)
+@feature(case_expr)
+
+data d = #A | #B | #C;
+
+fun factorial(n : int) : int {
+    if n =< 1 then {
+        return 1;
+    } else {
+        return n * factorial(n - 1);
+    };
+};
+
+print factorial(3);
+print ({
+    var x : int;
+    read x;
+    x + 1
+});
+print case #B of { #A => 1 | #B => 2 | #C => 3 };
+print ({
+    var x : int;
+    read x;
+
+    if x < 0 then {
+        x := 0;
+    };
+
+    x
+});
