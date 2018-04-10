@@ -538,7 +538,7 @@ impl Type {
     }
 
     pub fn can_convert_to_exact(&self, t: &Type) -> bool {
-        self == t || self == &Type::Error || t == &Type::Error
+        self == t || self == &Type::Error || t == &Type::Error || self == &Type::Never
     }
 
     pub fn pretty<'a>(&'a self, tdt: &'a TypeDefinitionTable) -> PrettyType<'a> {
