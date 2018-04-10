@@ -205,6 +205,7 @@ fn build_liveness_graph(
 
 fn do_dead_store_elimination(
     g: &mut FlowGraph,
+    ipa: &HashMap<usize, IpaStats>,
     w: &mut Write,
     l: &HashMap<u32, HashSet<IlRegister>>
 ) -> u32 {
@@ -233,6 +234,16 @@ fn do_dead_store_elimination(
                 // Update the liveness information to reflect the fact that the target register is
                 // dead above this point in the basic block.
                 live_vars.remove(&reg);
+            };
+
+            // Update the liveness information to reflect the fact that any registers that are
+            // nonlocally used by a call instruction are live above this point in the basic block.
+            if let IlInstruction::CallDirect(_, func_id, _) = *i {
+                for &sym_id in ipa[&func_id].nonlocal_refs.iter() {
+                    if let Some(&reg) = g.registers.locals.get(&sym_id) {
+                        live_vars.insert(reg);
+                    };
+                };
             };
 
             // Update the liveness information to reflect the fact that any registers used as
@@ -709,7 +720,7 @@ fn optimize_function(
 
         if optimizations.contains("dead-store") {
             let l = build_liveness_graph(g, ipa, w);
-            updated = do_dead_store_elimination(g, w, &l) != 0 || updated;
+            updated = do_dead_store_elimination(g, ipa, w, &l) != 0 || updated;
         };
 
         if optimizations.contains("dead-code") {
