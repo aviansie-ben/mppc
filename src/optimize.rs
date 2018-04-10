@@ -2,11 +2,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::mem;
 
-use il::{BasicBlock, FlowGraph, IlRegister, IlOperand, IlInstruction, Program};
+use il::{BasicBlock, FlowGraph, IlRegister, IlOperand, IlInstruction, IpaStats, Program, RegisterAlloc};
 use util;
 
 fn precompute_liveness(
     block: &BasicBlock,
+    ipa: &HashMap<usize, IpaStats>,
+    registers: &RegisterAlloc,
     w: &mut Write,
     gen: &mut HashSet<IlRegister>,
     kill: &mut HashSet<IlRegister>
@@ -20,16 +22,26 @@ fn precompute_liveness(
             writeln!(w, "@{} - overwriting {}", block.id, reg).unwrap();
             gen.remove(&reg);
             kill.insert(reg);
-        }
+        };
+
+        if let IlInstruction::CallDirect(_, func_id, _) = *i {
+            for &sym_id in ipa[&func_id].nonlocal_refs.iter() {
+                if let Some(&reg) = registers.locals.get(&sym_id) {
+                    writeln!(w, "@{} - using {} (due to nonlocal access to #{})", block.id, reg, sym_id).unwrap();
+                    gen.insert(reg);
+                    kill.remove(&reg);
+                };
+            };
+        };
 
         i.for_operands(|o| {
             if let Register(reg) = o {
                 writeln!(w, "@{} - using {}", block.id, reg).unwrap();
                 gen.insert(*reg);
                 kill.remove(reg);
-            }
+            };
         });
-    }
+    };
 }
 
 struct LivenessInfo {
@@ -44,6 +56,7 @@ fn update_liveness(
     block: &BasicBlock,
     g: &FlowGraph,
     w: &mut Write,
+    nonlocals: &Vec<IlRegister>,
     all_liveness: &mut HashMap<u32, LivenessInfo>
 ) -> bool {
     // Each basic block can only be updated once per pass through the CFG. This prevents infinite
@@ -58,17 +71,24 @@ fn update_liveness(
     let mut new_live_vars: HashSet<IlRegister> = HashSet::new();
 
     // If this block has a successor, then propagate its liveness information to this block.
+    // Otherwise, we need to make sure that all registers corresponding to nonlocals are live, since
+    // their values can be observed after the function returns.
     if let Some(target) = block.successor {
         updated = update_liveness(
             &g.blocks[&target],
             g,
             w,
+            &nonlocals,
             all_liveness
         ) || updated;
 
         for reg in &all_liveness[&target].live_vars_begin {
             new_live_vars.insert(*reg);
         }
+    } else {
+        for &reg in nonlocals.iter() {
+            new_live_vars.insert(reg);
+        };
     };
 
     // If this block has an alternate successor, then propagate its liveness information to this
@@ -78,6 +98,7 @@ fn update_liveness(
             &g.blocks[&target],
             g,
             w,
+            &nonlocals,
             all_liveness
         ) || updated;
 
@@ -123,17 +144,21 @@ fn update_liveness(
     updated
 }
 
-fn build_liveness_graph(g: &FlowGraph, w: &mut Write) -> HashMap<u32, HashSet<IlRegister>> {
+fn build_liveness_graph(
+    g: &FlowGraph,
+    ipa: &HashMap<usize, IpaStats>,
+    w: &mut Write
+) -> HashMap<u32, HashSet<IlRegister>> {
     writeln!(w, "========== LIVENESS GRAPH CONSTRUCTION ==========\n").unwrap();
 
     let mut liveness: HashMap<u32, LivenessInfo> = HashMap::new();
-    for (_, b) in &g.blocks {
+    for (_, b) in g.blocks.iter() {
         // Find a gen/kill set that is equivalent (in terms of liveness) to the instructions in the
         // current basic block. See precompute_liveness for more information.
         let mut gen: HashSet<IlRegister> = HashSet::new();
         let mut kill: HashSet<IlRegister> = HashSet::new();
 
-        precompute_liveness(b, w, &mut gen, &mut kill);
+        precompute_liveness(b, ipa, &g.registers, w, &mut gen, &mut kill);
 
         liveness.insert(b.id, LivenessInfo {
             live_vars_begin: gen.clone(),
@@ -144,12 +169,21 @@ fn build_liveness_graph(g: &FlowGraph, w: &mut Write) -> HashMap<u32, HashSet<Il
         });
     };
 
+    let nonlocals: Vec<_> = g.registers.reg_meta.iter().filter_map(|(&reg, reg_meta)| {
+        if reg_meta.reg_type.is_nonlocal() {
+            writeln!(w, "@end - implicitly using {} since it is nonlocal", reg).unwrap();
+            Some(reg)
+        } else {
+            None
+        }
+    }).collect();
+
     loop {
         writeln!(w, "Propagating between basic blocks...").unwrap();
 
-        // Go through and propagate liveness information between basic blocks. If no liveness\
+        // Go through and propagate liveness information between basic blocks. If no liveness
         // information was changed, we're done.
-        if !update_liveness(&g.blocks[&g.start_block], g, w, &mut liveness) {
+        if !update_liveness(&g.blocks[&g.start_block], g, w, &nonlocals, &mut liveness) {
             break;
         };
 
@@ -260,6 +294,7 @@ fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlOperand
 
 fn do_constant_fold(
     g: &mut FlowGraph,
+    ipa: &HashMap<usize, IpaStats>,
     w: &mut Write,
     input: &HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>,
     assigns: &mut HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>
@@ -271,7 +306,7 @@ fn do_constant_fold(
 
     let mut num_substitutions = 0;
 
-    for (_, b) in &mut g.blocks {
+    for (_, b) in g.blocks.iter_mut() {
         let input = input.get(&b.id);
         let assigns = assigns.entry(b.id).or_insert_with(HashMap::new);
         assigns.clear();
@@ -291,6 +326,16 @@ fn do_constant_fold(
                     };
                 };
             });
+
+            // If this instruction is a call to a function, we need to make sure to invalidate the
+            // known values of any nonlocals that the function might write to.
+            if let IlInstruction::CallDirect(_, func_id, _) = *i {
+                for &sym_id in ipa[&func_id].nonlocal_refs.iter() {
+                    if let Some(&reg) = g.registers.locals.get(&sym_id) {
+                        assigns.insert(reg, None);
+                    };
+                };
+            };
 
             // Now look at the instruction itself. If the instruction's result can be computed at
             // compile-time, do so using try_fold_constant. If the instruction is a simple copy of
@@ -506,20 +551,20 @@ fn do_global_propagation(
     writeln!(w).unwrap();
 }
 
-fn do_propagation(g: &mut FlowGraph, w: &mut Write) {
+fn do_propagation(g: &mut FlowGraph, ipa: &HashMap<usize, IpaStats>, w: &mut Write) {
     let mut assigns = HashMap::new();
     let mut constants: HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>
         = g.blocks.iter().map(|(id, _)| (*id, HashMap::new())).collect();
 
     // Start with local constant folding and propagation so that we know the values assigned to each
     // variable in all basic blocks.
-    do_constant_fold(g, w, &constants, &mut assigns);
+    do_constant_fold(g, ipa, w, &constants, &mut assigns);
 
     // Perform global constant propagation followed by local constant folding and propagation until
     // no more constants are found to propagate.
     loop {
         do_global_propagation(g, w, &mut constants, &assigns);
-        if do_constant_fold(g, w, &constants, &mut assigns) == 0 {
+        if do_constant_fold(g, ipa, w, &constants, &mut assigns) == 0 {
             break;
         };
     };
@@ -642,10 +687,15 @@ fn do_empty_block_elision(
     empty_blocks.len()
 }
 
-fn optimize_function(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&'static str>) {
+fn optimize_function(
+    g: &mut FlowGraph,
+    ipa: &HashMap<usize, IpaStats>,
+    w: &mut Write,
+    optimizations: &HashSet<&'static str>
+) {
     if optimizations.len() == 0 {
         return;
-    }
+    };
 
     // IMPORTANT: The order in which these optimizations are applied can affect the number of
     // optimization passes required, since the application of one optimization can create new
@@ -654,11 +704,11 @@ fn optimize_function(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&
         let mut updated = false;
 
         if optimizations.contains("const") {
-            do_propagation(g, w);
+            do_propagation(g, ipa, w);
         };
 
         if optimizations.contains("dead-store") {
-            let l = build_liveness_graph(g, w);
+            let l = build_liveness_graph(g, ipa, w);
             updated = do_dead_store_elimination(g, w, &l) != 0 || updated;
         };
 
@@ -678,9 +728,162 @@ fn optimize_function(g: &mut FlowGraph, w: &mut Write, optimizations: &HashSet<&
 }
 
 pub fn optimize_il(program: &mut Program, w: &mut Write, optimizations: &HashSet<&'static str>) {
-    optimize_function(&mut program.main_block, w, optimizations);
+    perform_ipa(program, w);
+    optimize_function(&mut program.main_block, &program.ipa, w, optimizations);
 
     for &mut (_, ref mut g) in &mut program.funcs {
-        optimize_function(g, w, optimizations);
+        optimize_function(g, &program.ipa, w, optimizations);
     };
+}
+
+pub fn perform_ipa(program: &mut Program, w: &mut Write) {
+    writeln!(w, "========== INTERPROCEDURAL ANALYSIS ==========\n").unwrap();
+
+    fn analyze_function(
+        g: &mut FlowGraph,
+        stats: &mut IpaStats,
+        w: &mut Write
+    ) {
+        stats.calls.clear();
+        stats.nonlocal_refs.clear();
+        stats.nonlocal_writes.clear();
+
+        for (_, b) in g.blocks.iter_mut() {
+            for i in b.instrs.iter() {
+                match *i {
+                    IlInstruction::CallDirect(_, func_id, _) => {
+                        writeln!(w, "  Found a call to #{}", func_id).unwrap();
+                        stats.calls.insert(func_id);
+                    },
+                    _ => {}
+                };
+
+                if let Some(target) = i.target_register() {
+                    let reg_meta = &g.registers.reg_meta[&target];
+
+                    if reg_meta.reg_type.is_nonlocal() {
+                        let sym_id = reg_meta.sym_id.unwrap();
+
+                        writeln!(w, "  Found a write to nonlocal #{}", sym_id).unwrap();
+                        stats.nonlocal_refs.insert(sym_id);
+                        stats.nonlocal_writes.insert(sym_id);
+                    };
+                };
+
+                {
+                    let registers = &g.registers;
+                    i.for_operands(|o| if let IlOperand::Register(r) = o {
+                        let reg_meta = &registers.reg_meta[&r];
+
+                        if reg_meta.reg_type.is_nonlocal() {
+                            let sym_id = reg_meta.sym_id.unwrap();
+
+                            writeln!(w, "  Found a read from nonlocal #{}", sym_id).unwrap();
+                            stats.nonlocal_refs.insert(sym_id);
+                        };
+                    });
+                };
+            };
+        }
+    }
+
+    for &mut (func_id, ref mut func) in program.funcs.iter_mut() {
+        writeln!(w, "Analyzing #{}...", func_id).unwrap();
+        analyze_function(
+            func,
+            program.ipa.entry(func_id).or_insert_with(IpaStats::new),
+            w
+        );
+    };
+
+    writeln!(w, "Propagating calls between functions...").unwrap();
+    let func_ids: Vec<_> = program.funcs.iter()
+        .map(|&(id, _)| id)
+        .collect();
+
+    for &func_id in func_ids.iter() {
+        fn append_calls(
+            calls: &mut HashSet<usize>,
+            next_func: usize,
+            ipa: &HashMap<usize, IpaStats>
+        ) {
+            if calls.insert(next_func) {
+                for &called_id in ipa[&next_func].calls.iter() {
+                    append_calls(calls, called_id, ipa);
+                };
+            };
+        }
+
+        let mut calls = HashSet::new();
+
+        for called_id in mem::replace(&mut program.ipa.get_mut(&func_id).unwrap().calls, HashSet::new()) {
+            append_calls(&mut calls, called_id, &program.ipa);
+        };
+
+        writeln!(
+            w,
+            "  #{} ->{}",
+            func_id,
+            util::DeferredDisplay(|f| {
+                if calls.len() == 0 {
+                    write!(f, " none")?;
+                } else {
+                    for &called_id in calls.iter() {
+                        write!(f, " #{}", called_id)?;
+                    };
+                };
+                Result::Ok(())
+            })
+        ).unwrap();
+
+        mem::replace(&mut program.ipa.get_mut(&func_id).unwrap().calls, calls);
+    };
+
+    writeln!(w, "Propagating nonlocal usage between functions...").unwrap();
+
+    for &func_id in func_ids.iter() {
+        let mut ipa = program.ipa.remove(&func_id).unwrap();
+
+        for &called_id in ipa.calls.iter() {
+            if called_id == func_id { continue; };
+
+            for &nonlocal_ref in program.ipa[&called_id].nonlocal_refs.iter() {
+                ipa.nonlocal_refs.insert(nonlocal_ref);
+            };
+
+            for &nonlocal_write in program.ipa[&called_id].nonlocal_writes.iter() {
+                ipa.nonlocal_writes.insert(nonlocal_write);
+            };
+        };
+
+        writeln!(
+            w,
+            "  #{} references{}, writes to{}",
+            func_id,
+            util::DeferredDisplay(|f| {
+                if ipa.nonlocal_refs.len() == 0 {
+                    write!(f, " none")?;
+                } else {
+                    for &sym_id in ipa.nonlocal_refs.iter() {
+                        write!(f, " #{}", sym_id)?;
+                    };
+                };
+                Result::Ok(())
+            }),
+            util::DeferredDisplay(|f| {
+                if ipa.nonlocal_writes.len() == 0 {
+                    write!(f, " none")?;
+                } else {
+                    for &sym_id in ipa.nonlocal_writes.iter() {
+                        write!(f, " #{}", sym_id)?;
+                    };
+                };
+                Result::Ok(())
+            })
+        ).unwrap();
+
+        program.ipa.insert(func_id, ipa);
+    };
+
+    writeln!(w).unwrap();
 }

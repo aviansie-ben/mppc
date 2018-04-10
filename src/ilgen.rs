@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 
 use ast;
@@ -157,13 +158,11 @@ fn append_expr_to(
 
             match sym.node {
                 symbol::SymbolType::Var(_) | symbol::SymbolType::Param(_) => {
-                    // TODO Handle globals and nonlocals
-                    assert_eq!(sym.defining_fun, ctx.func_id, "nonlocals are not yet supported");
-
                     block.instrs.push(IlInstruction::Copy(
                         target,
                         IlOperand::Register(g.registers.get_or_alloc_local(
-                            sym_id,
+                            ctx.func_id,
+                            sym,
                             translate_type(&sym.val_type(), ctx)
                         ))
                     ))
@@ -248,12 +247,10 @@ fn append_store_to_expr(
 
             match sym.node {
                 symbol::SymbolType::Var(_) | symbol::SymbolType::Param(_) => {
-                    // TODO Handle globals and nonlocals
-                    assert_eq!(sym.defining_fun, ctx.func_id, "Nonlocals are not yet supported");
-
                     block.instrs.push(IlInstruction::Copy(
                         g.registers.get_or_alloc_local(
-                            sym_id,
+                            ctx.func_id,
+                            sym,
                             translate_type(&sym.val_type(), ctx)
                         ),
                         IlOperand::Register(source)
@@ -428,6 +425,7 @@ pub fn generate_il(program: &ast::Program, w: &mut Write) -> Program {
             }, w)))
         } else {
             None
-        }).collect()
+        }).collect(),
+        ipa: HashMap::new()
     }
 }

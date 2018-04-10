@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::fmt;
 use std::iter::FromIterator;
 use std::mem;
 
+use symbol;
 use util::DeferredDisplay;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,47 @@ pub enum IlType {
     Int,
     Float,
     Addr
+}
+
+impl fmt::Display for IlType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use il::IlType::*;
+        match *self {
+            Int => write!(f, "i32"),
+            Float => write!(f, "f64"),
+            Addr => write!(f, "a")
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IlRegisterType {
+    Temporary,
+    Local(bool),
+    NonLocal(usize),
+    Global
+}
+
+impl IlRegisterType {
+    pub fn has_nonlocal_references(&self) -> bool {
+        use il::IlRegisterType::*;
+        match *self {
+            Temporary => false,
+            Local(has_nonlocal_references) => has_nonlocal_references,
+            NonLocal(_) => true,
+            Global => true
+        }
+    }
+
+    pub fn is_nonlocal(&self) -> bool {
+        use il::IlRegisterType::*;
+        match *self {
+            Temporary => false,
+            Local(_) => false,
+            NonLocal(_) => true,
+            Global => true
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,9 +101,9 @@ impl fmt::Display for IlConst {
             Int(v) => write!(f, "i32:{}", v),
             Float(v) => write!(f, "f64:{}", v),
             AddrSym(id, off) => if off == 0 {
-                write!(f, "a:${}", id)
+                write!(f, "a:#{}", id)
             } else {
-                write!(f, "a:${}+{}", id, off)
+                write!(f, "a:#{}+{}", id, off)
             },
             Addr(v) => write!(f, "a:{}", v)
         }
@@ -69,22 +111,17 @@ impl fmt::Display for IlConst {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IlRegister(u32, IlType);
+pub struct IlRegister(usize);
 
 impl IlRegister {
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> usize {
         self.0
-    }
-
-    pub fn reg_type(&self) -> IlType {
-        self.1
     }
 }
 
 impl fmt::Display for IlRegister {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let IlRegister(n, _) = self;
-        write!(f, "${}", n)
+        write!(f, "${}", self.0)
     }
 }
 
@@ -537,29 +574,50 @@ impl fmt::Display for BasicBlock {
     }
 }
 
+pub struct RegisterMeta {
+    pub val_type: IlType,
+    pub reg_type: IlRegisterType,
+    pub sym_id: Option<usize>
+}
+
 pub struct RegisterAlloc {
     pub locals: HashMap<usize, IlRegister>,
-    next_reg: u32
+    pub reg_meta: HashMap<IlRegister, RegisterMeta>,
+    next_reg: usize
 }
 
 impl RegisterAlloc {
     pub fn new() -> RegisterAlloc {
         RegisterAlloc {
             locals: HashMap::new(),
+            reg_meta: HashMap::new(),
             next_reg: 0
         }
     }
 
-    pub fn get_or_alloc_local(&mut self, id: usize, reg_type: IlType) -> IlRegister {
-        match self.locals.entry(id) {
+    pub fn get_or_alloc_local(&mut self, fun: usize, sym: &symbol::Symbol, val_type: IlType) -> IlRegister {
+        match self.locals.entry(sym.id) {
             Entry::Occupied(e) => {
-                assert_eq!(reg_type, e.get().1);
-                *e.get()
+                let reg = *e.get();
+
+                assert_eq!(val_type, self.reg_meta[&reg].val_type);
+                reg
             },
             Entry::Vacant(e) => {
-                let reg = IlRegister(self.next_reg, reg_type);
+                let reg = IlRegister(self.next_reg);
 
                 e.insert(reg);
+                self.reg_meta.insert(reg, RegisterMeta {
+                    val_type: val_type,
+                    reg_type: if sym.defining_fun == !0 && sym.has_nonlocal_references.get() {
+                        IlRegisterType::Global
+                    } else if sym.defining_fun == fun {
+                        IlRegisterType::Local(sym.has_nonlocal_references.get())
+                    } else {
+                        IlRegisterType::NonLocal(sym.defining_fun)
+                    },
+                    sym_id: Some(sym.id)
+                });
                 self.next_reg += 1;
 
                 reg
@@ -567,9 +625,14 @@ impl RegisterAlloc {
         }
     }
 
-    pub fn alloc_temp(&mut self, reg_type: IlType) -> IlRegister {
-        let reg = IlRegister(self.next_reg, reg_type);
+    pub fn alloc_temp(&mut self, val_type: IlType) -> IlRegister {
+        let reg = IlRegister(self.next_reg);
 
+        self.reg_meta.insert(reg, RegisterMeta {
+            val_type: val_type,
+            reg_type: IlRegisterType::Temporary,
+            sym_id: None
+        });
         self.next_reg += 1;
 
         reg
@@ -580,7 +643,8 @@ pub struct FlowGraph {
     pub blocks: HashMap<u32, BasicBlock>,
     pub start_block: u32,
     next_block: u32,
-    pub registers: RegisterAlloc
+    pub registers: RegisterAlloc,
+    pub calls: HashSet<usize>
 }
 
 impl FlowGraph {
@@ -589,7 +653,8 @@ impl FlowGraph {
             blocks: HashMap::new(),
             start_block: 0,
             next_block: 0,
-            registers: RegisterAlloc::new()
+            registers: RegisterAlloc::new(),
+            calls: HashSet::new()
         }
     }
 
@@ -606,6 +671,24 @@ impl FlowGraph {
 
 impl fmt::Display for FlowGraph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (reg, reg_meta) in &self.registers.reg_meta {
+            match reg_meta.reg_type {
+                IlRegisterType::Temporary => {},
+                IlRegisterType::Local(false) => {
+                    write!(f, "\n.local #{} {} {}", reg_meta.sym_id.unwrap(), reg, reg_meta.val_type)?;
+                },
+                IlRegisterType::Local(true) => {
+                    write!(f, "\n.local #{} {} captured {}", reg_meta.sym_id.unwrap(), reg, reg_meta.val_type)?;
+                },
+                IlRegisterType::NonLocal(func_id) => {
+                    write!(f, "\n.nonlocal #{}:#{} {} {}", func_id, reg_meta.sym_id.unwrap(), reg, reg_meta.val_type)?;
+                },
+                IlRegisterType::Global => {
+                    write!(f, "\n.global #{} {} {}", reg_meta.sym_id.unwrap(), reg, reg_meta.val_type)?;
+                }
+            };
+        };
+
         for id in 0..self.next_block {
             if let Some(block) = self.blocks.get(&id) {
                 writeln!(f, "\n{}", block)?;
@@ -615,9 +698,26 @@ impl fmt::Display for FlowGraph {
     }
 }
 
+pub struct IpaStats {
+    pub calls: HashSet<usize>,
+    pub nonlocal_refs: HashSet<usize>,
+    pub nonlocal_writes: HashSet<usize>
+}
+
+impl IpaStats {
+    pub fn new() -> IpaStats {
+        IpaStats {
+            calls: HashSet::new(),
+            nonlocal_refs: HashSet::new(),
+            nonlocal_writes: HashSet::new()
+        }
+    }
+}
+
 pub struct Program {
     pub main_block: FlowGraph,
-    pub funcs: Vec<(usize, FlowGraph)>
+    pub funcs: Vec<(usize, FlowGraph)>,
+    pub ipa: HashMap<usize, IpaStats>
 }
 
 impl fmt::Display for Program {
