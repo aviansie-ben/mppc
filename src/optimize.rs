@@ -330,7 +330,7 @@ fn do_constant_fold(
             // If this instruction is a call to a function, we need to make sure to invalidate the
             // known values of any nonlocals that the function might write to.
             if let IlInstruction::CallDirect(_, func_id, _) = *i {
-                for &sym_id in ipa[&func_id].nonlocal_refs.iter() {
+                for &sym_id in ipa[&func_id].nonlocal_writes.iter() {
                     if let Some(&reg) = g.registers.locals.get(&sym_id) {
                         assigns.insert(reg, None);
                     };
