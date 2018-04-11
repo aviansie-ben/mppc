@@ -479,6 +479,7 @@ pub enum Type {
     Char,
     Defined(usize),
     Array(Box<Type>, u32),
+    PartialArray(Box<Type>, u32),
     Never,
     Unresolved(Vec<Type>),
     Unknown,
@@ -606,6 +607,15 @@ impl fmt::Display for Type {
                     write!(f, "[]")?;
                 };
             },
+            PartialArray(ref inner_type, dims) => {
+                write!(f, "{}", inner_type)?;
+
+                for _ in 0..dims {
+                    write!(f, "[]")?;
+                };
+
+                write!(f, " (partially dereferenced)")?;
+            },
             Never => write!(f, "(never type)")?,
             Unresolved(ref possible_types) => {
                 if possible_types.len() == 1 {
@@ -667,6 +677,15 @@ impl <'a> fmt::Display for PrettyType<'a> {
                 for _ in 0..dims {
                     write!(f, "[]")?;
                 };
+            },
+            PartialArray(ref inner_type, dims) => {
+                write!(f, "{}", inner_type.pretty(tdt))?;
+
+                for _ in 0..dims {
+                    write!(f, "[]")?;
+                };
+
+                write!(f, " (partially dereferenced)")?;
             },
             Never => write!(f, "(never type)")?,
             Unresolved(ref possible_types) => {

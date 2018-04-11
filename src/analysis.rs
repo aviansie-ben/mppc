@@ -954,19 +954,22 @@ fn do_analyze_expression(
             analyze_expression(index, ctx, symbols, Some(&Type::Int));
             expect_convert_exact!(ctx, index, &Type::Int);
 
-            if let Type::Array(inner_type, dims) = val_type {
-                // We can only assign values to an array once we have fully dereferenced it, so set
-                // the assignability of the expression and the type accordingly.
-                return if dims == 1 {
+            match val_type {
+                Type::Array(inner_type, dims) | Type::PartialArray(inner_type, dims) => {
+                    // We can only assign values to an array once we have fully dereferenced it, so
+                    // set the assignability of the expression and the type accordingly.
+                    return if dims == 1 {
+                        expr.assignable = true;
+                        *inner_type
+                    } else {
+                        Type::PartialArray(inner_type, dims - 1)
+                    };
+                },
+                _ => {
                     expr.assignable = true;
-                    *inner_type
-                } else {
-                    Type::Array(inner_type, dims - 1)
-                };
-            } else {
-                expr.assignable = true;
-                ctx.push_error(cannot_index!(ctx, val, expr.span));
-                return Type::Error;
+                    ctx.push_error(cannot_index!(ctx, val, expr.span));
+                    return Type::Error;
+                }
             };
         },
         ast::ExprType::Cons(ref name, ref mut params, ref mut expr_ctor_id) => {
