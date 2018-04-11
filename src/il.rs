@@ -33,6 +33,17 @@ pub enum IlType {
     Addr
 }
 
+impl IlType {
+    pub fn size(&self) -> u64 {
+        use il::IlType::*;
+        match *self {
+            Int => 4,
+            Float => 8,
+            Addr => 8
+        }
+    }
+}
+
 impl fmt::Display for IlType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use il::IlType::*;
@@ -158,6 +169,8 @@ pub enum IlInstruction {
     SubFloat(IlRegister, IlOperand, IlOperand),
     MulFloat(IlRegister, IlOperand, IlOperand),
     DivFloat(IlRegister, IlOperand, IlOperand),
+    AddAddr(IlRegister, IlOperand, IlOperand),
+    MulAddr(IlRegister, IlOperand, IlOperand),
 
     EqInt(IlRegister, IlOperand, IlOperand),
     LtInt(IlRegister, IlOperand, IlOperand),
@@ -169,6 +182,17 @@ pub enum IlInstruction {
     GtFloat(IlRegister, IlOperand, IlOperand),
     LeFloat(IlRegister, IlOperand, IlOperand),
     GeFloat(IlRegister, IlOperand, IlOperand),
+
+    AllocStack(IlRegister, IlOperand),
+    AllocHeap(IlRegister, IlOperand),
+
+    LoadInt(IlRegister, IlOperand),
+    LoadFloat(IlRegister, IlOperand),
+    LoadAddr(IlRegister, IlOperand),
+
+    StoreInt(IlOperand, IlOperand),
+    StoreFloat(IlOperand, IlOperand),
+    StoreAddr(IlOperand, IlOperand),
 
     PrintInt(IlOperand),
     PrintBool(IlOperand),
@@ -245,6 +269,14 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            AddAddr(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
+            MulAddr(_, ref mut o1, ref mut o2) => {
+                f(o1);
+                f(o2);
+            },
             EqInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
@@ -284,6 +316,23 @@ impl IlInstruction {
             GeFloat(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
+            },
+            AllocStack(_, ref mut o) => f(o),
+            AllocHeap(_, ref mut o) => f(o),
+            LoadInt(_, ref mut o) => f(o),
+            LoadFloat(_, ref mut o) => f(o),
+            LoadAddr(_, ref mut o) => f(o),
+            StoreInt(ref mut a, ref mut v) => {
+                f(a);
+                f(v);
+            },
+            StoreFloat(ref mut a, ref mut v) => {
+                f(a);
+                f(v);
+            },
+            StoreAddr(ref mut a, ref mut v) => {
+                f(a);
+                f(v);
             },
             PrintInt(ref mut o) => f(o),
             PrintBool(ref mut o) => f(o),
@@ -340,6 +389,14 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            AddAddr(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
+            MulAddr(_, ref o1, ref o2) => {
+                f(o1);
+                f(o2);
+            },
             EqInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
@@ -380,6 +437,23 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            AllocStack(_, ref o) => f(o),
+            AllocHeap(_, ref o) => f(o),
+            LoadInt(_, ref o) => f(o),
+            LoadFloat(_, ref o) => f(o),
+            LoadAddr(_, ref o) => f(o),
+            StoreInt(ref a, ref v) => {
+                f(a);
+                f(v);
+            },
+            StoreFloat(ref a, ref v) => {
+                f(a);
+                f(v);
+            },
+            StoreAddr(ref a, ref v) => {
+                f(a);
+                f(v);
+            },
             PrintInt(ref o) => f(o),
             PrintBool(ref o) => f(o),
             PrintChar(ref o) => f(o),
@@ -409,6 +483,8 @@ impl IlInstruction {
             SubFloat(r, _, _) => Some(r),
             MulFloat(r, _, _) => Some(r),
             DivFloat(r, _, _) => Some(r),
+            AddAddr(r, _, _) => Some(r),
+            MulAddr(r, _, _) => Some(r),
             EqInt(r, _, _) => Some(r),
             LtInt(r, _, _) => Some(r),
             GtInt(r, _, _) => Some(r),
@@ -419,6 +495,14 @@ impl IlInstruction {
             GtFloat(r, _, _) => Some(r),
             LeFloat(r, _, _) => Some(r),
             GeFloat(r, _, _) => Some(r),
+            AllocStack(r, _) => Some(r),
+            AllocHeap(r, _) => Some(r),
+            LoadInt(r, _) => Some(r),
+            LoadFloat(r, _) => Some(r),
+            LoadAddr(r, _) => Some(r),
+            StoreInt(_, _) => None,
+            StoreFloat(_, _) => None,
+            StoreAddr(_, _) => None,
             PrintInt(_) => None,
             PrintBool(_) => None,
             PrintChar(_) => None,
@@ -445,6 +529,8 @@ impl IlInstruction {
             SubFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             MulFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             DivFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            AddAddr(ref mut old_target, _, _) => mem::replace(old_target, target),
+            MulAddr(ref mut old_target, _, _) => mem::replace(old_target, target),
             EqInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             LtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             GtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
@@ -455,6 +541,11 @@ impl IlInstruction {
             GtFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             LeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             GeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            AllocStack(ref mut old_target, _) => mem::replace(old_target, target),
+            AllocHeap(ref mut old_target, _) => mem::replace(old_target, target),
+            LoadInt(ref mut old_target, _) => mem::replace(old_target, target),
+            LoadFloat(ref mut old_target, _) => mem::replace(old_target, target),
+            LoadAddr(ref mut old_target, _) => mem::replace(old_target, target),
             ReadInt(ref mut old_target) => mem::replace(old_target, target),
             ReadBool(ref mut old_target) => mem::replace(old_target, target),
             ReadChar(ref mut old_target) => mem::replace(old_target, target),
@@ -470,6 +561,9 @@ impl IlInstruction {
             JumpZero(_, _) => true,
             Return(_) => true,
             CallDirect(_, _, _) => true,
+            StoreInt(_, _) => true,
+            StoreFloat(_, _) => true,
+            StoreAddr(_, _) => true,
             PrintInt(_) => true,
             PrintBool(_) => true,
             PrintChar(_) => true,
@@ -509,6 +603,8 @@ impl fmt::Display for IlInstruction {
             SubFloat(ref reg, ref lhs, ref rhs) => write!(f, "sub.f64 {} {} {}", reg, lhs, rhs),
             MulFloat(ref reg, ref lhs, ref rhs) => write!(f, "mul.f64 {} {} {}", reg, lhs, rhs),
             DivFloat(ref reg, ref lhs, ref rhs) => write!(f, "div.f64 {} {} {}", reg, lhs, rhs),
+            AddAddr(ref reg, ref lhs, ref rhs) => write!(f, "add.a {} {} {}", reg, lhs, rhs),
+            MulAddr(ref reg, ref lhs, ref rhs) => write!(f, "mul.a {} {} {}", reg, lhs, rhs),
             EqInt(ref reg, ref lhs, ref rhs) => write!(f, "eq.i32 {} {} {}", reg, lhs, rhs),
             LtInt(ref reg, ref lhs, ref rhs) => write!(f, "lt.i32 {} {} {}", reg, lhs, rhs),
             GtInt(ref reg, ref lhs, ref rhs) => write!(f, "gt.i32 {} {} {}", reg, lhs, rhs),
@@ -519,6 +615,14 @@ impl fmt::Display for IlInstruction {
             GtFloat(ref reg, ref lhs, ref rhs) => write!(f, "gt.f64 {} {} {}", reg, lhs, rhs),
             LeFloat(ref reg, ref lhs, ref rhs) => write!(f, "le.f64 {} {} {}", reg, lhs, rhs),
             GeFloat(ref reg, ref lhs, ref rhs) => write!(f, "ge.f64 {} {} {}", reg, lhs, rhs),
+            AllocStack(ref reg, ref size) => write!(f, "alloc_stack {} {}", reg, size),
+            AllocHeap(ref reg, ref size) => write!(f, "alloc_heap {} {}", reg, size),
+            LoadInt(ref reg, ref addr) => write!(f, "ld.i32 {} {}", reg, addr),
+            LoadFloat(ref reg, ref addr) => write!(f, "ld.f64 {} {}", reg, addr),
+            LoadAddr(ref reg, ref addr) => write!(f, "ld.a {} {}", reg, addr),
+            StoreInt(ref addr, ref val) => write!(f, "st.i32 {} {}", addr, val),
+            StoreFloat(ref addr, ref val) => write!(f, "st.f64 {} {}", addr, val),
+            StoreAddr(ref addr, ref val) => write!(f, "st.a {} {}", addr, val),
             PrintInt(ref val) => write!(f, "print.i32 {}", val),
             PrintBool(ref val) => write!(f, "print_b.i32 {}", val),
             PrintChar(ref val) => write!(f, "print_c.i32 {}", val),

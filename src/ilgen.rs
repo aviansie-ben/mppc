@@ -18,14 +18,100 @@ fn translate_type(
 ) -> IlType {
     use symbol::Type::*;
 
-    // TODO Support non-integers
+    // TODO Support arrays
     match *t {
         Int => IlType::Int,
         Bool => IlType::Int,
         Char => IlType::Int,
         Real => IlType::Float,
-        ref t => panic!("unsupported type {}", t)
+        Defined(id) => match ctx.tdt.get_definition(id) {
+            symbol::TypeDefinition::Data(_) => IlType::Addr,
+            _ => panic!("unsupported type {}", t.pretty(ctx.tdt))
+        },
+        ref t => panic!("unsupported type {}", t.pretty(ctx.tdt))
     }
+}
+
+fn append_cases<T, U: FnMut (&T, &mut IlGenContext, &mut BasicBlock, &mut FlowGraph, &mut Write)>(
+    cases: &[ast::Case<T>],
+    mut appender: U,
+    val: &ast::Expr,
+    ctx: &mut IlGenContext,
+    block: &mut BasicBlock,
+    g: &mut FlowGraph,
+    w: &mut Write
+) {
+    let val_reg = append_expr(val, ctx, block, g, w);
+    let variant_reg = g.registers.alloc_temp(IlType::Int);
+    block.instrs.push(IlInstruction::LoadInt(variant_reg, IlOperand::Register(val_reg)));
+
+    let val_type = match val.val_type {
+        symbol::Type::Defined(id) => match ctx.tdt.get_definition(id) {
+            symbol::TypeDefinition::Data(ref td) => td,
+            _ => unreachable!()
+        },
+        _ => unreachable!()
+    };
+    let mut branch_ends = vec![];
+
+    for c in cases.iter() {
+        let check_block = block.id;
+        let check_reg = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::EqInt(
+            check_reg,
+            IlOperand::Register(variant_reg),
+            IlOperand::Const(IlConst::Int(c.ctor_id as i32))
+        ));
+        block.instrs.push(IlInstruction::JumpZero(
+            IlOperand::Register(check_reg),
+            !0
+        ));
+        block.successor = Some(block.id + 1);
+        g.append_block(block);
+
+        let ctor = &val_type.ctors[c.ctor_id];
+        let types: Vec<_> = ctor.args.iter().map(|a| translate_type(a, ctx)).collect();
+
+        for (i, &val_sym) in c.var_bindings.iter().enumerate() {
+            let t = &types[i];
+            let addr_reg = g.registers.alloc_temp(IlType::Addr);
+            let subval_reg = g.registers.get_or_alloc_local(ctx.func_id, ctx.sdt.get_symbol(val_sym), t.clone());
+
+            block.instrs.push(IlInstruction::AddAddr(
+                addr_reg,
+                IlOperand::Register(val_reg),
+                IlOperand::Const(IlConst::Addr(
+                    4 + types.iter().take(i).map(|t| t.size()).sum::<u64>()
+                ))
+            ));
+
+            block.instrs.push(match t {
+                IlType::Int => IlInstruction::LoadInt(
+                    subval_reg,
+                    IlOperand::Register(addr_reg)
+                ),
+                IlType::Float => IlInstruction::LoadFloat(
+                    subval_reg,
+                    IlOperand::Register(addr_reg)
+                ),
+                IlType::Addr => IlInstruction::LoadAddr(
+                    subval_reg,
+                    IlOperand::Register(addr_reg)
+                )
+            });
+        };
+
+        appender(&c.branch, ctx, block, g, w);
+        branch_ends.push(block.id);
+        g.append_block(block);
+
+        g.blocks.get_mut(&check_block).unwrap().relink_alt_successor(block.id);
+    };
+
+    for branch_end in branch_ends {
+        g.blocks.get_mut(&branch_end).unwrap().successor = Some(block.id);
+    };
 }
 
 fn append_expr_to(
@@ -178,6 +264,48 @@ fn append_expr_to(
             block.instrs.push(IlInstruction::CallDirect(target, func, args));
         },
         Call(_, _) => panic!("indirect calls are not yet supported"),
+        Cons(_, ref args, ctor_id) => {
+            let types: Vec<_> = args.iter().map(|a| translate_type(&a.val_type, ctx)).collect();
+
+            block.instrs.push(IlInstruction::AllocHeap(
+                target,
+                IlOperand::Const(IlConst::Addr(
+                    IlType::Int.size() + types.iter().map(|t| t.size()).sum::<u64>()
+                ))
+            ));
+            block.instrs.push(IlInstruction::StoreInt(
+                IlOperand::Register(target),
+                IlOperand::Const(IlConst::Int(ctor_id as i32))
+            ));
+
+            for (i, arg) in args.iter().enumerate() {
+                let addr_reg = g.registers.alloc_temp(IlType::Addr);
+                let val_reg = append_expr(arg, ctx, block, g, w);
+
+                block.instrs.push(IlInstruction::AddAddr(
+                    addr_reg,
+                    IlOperand::Register(target),
+                    IlOperand::Const(IlConst::Addr(
+                        4 + types.iter().take(i).map(|t| t.size()).sum::<u64>()
+                    ))
+                ));
+
+                block.instrs.push(match translate_type(&arg.val_type, ctx) {
+                    IlType::Int => IlInstruction::StoreInt(
+                        IlOperand::Register(addr_reg),
+                        IlOperand::Register(val_reg)
+                    ),
+                    IlType::Float => IlInstruction::StoreFloat(
+                        IlOperand::Register(addr_reg),
+                        IlOperand::Register(val_reg)
+                    ),
+                    IlType::Addr => IlInstruction::StoreAddr(
+                        IlOperand::Register(addr_reg),
+                        IlOperand::Register(val_reg)
+                    )
+                });
+            };
+        },
         Int(val) => {
             block.instrs.push(IlInstruction::Copy(target, IlOperand::Const(IlConst::Int(val))));
         },
@@ -203,6 +331,17 @@ fn append_expr_to(
             if let Some(ref result) = *result {
                 append_expr_to(result, target, ctx, block, g, w);
             };
+        },
+        Case(ref val, ref cases) => {
+            append_cases(
+                &cases[..],
+                |e, ctx, block, g, w| { append_expr_to(e, target, ctx, block, g, w); },
+                val,
+                ctx,
+                block,
+                g,
+                w
+            );
         },
         ref n => panic!("not yet supported: {:?}", n)
     };
@@ -357,6 +496,17 @@ fn append_stmt(
         Block(ref ast_block) => {
             append_block(ast_block, ctx, block, g, w);
         },
+        Case(ref val, ref cases) => {
+            append_cases(
+                &cases[..],
+                append_stmt,
+                val,
+                ctx,
+                block,
+                g,
+                w
+            );
+        },
         Return(ref val) => {
             let val_reg = append_expr(val, ctx, block, g, w);
             block.instrs.push(IlInstruction::Return(IlOperand::Register(val_reg)));
@@ -365,8 +515,7 @@ fn append_stmt(
             // way, if any statements appear after the return, they will be properly detected as
             // dead code.
             g.append_block(block);
-        },
-        ref n => panic!("not yet supported: {:?}", n)
+        }
     }
 }
 
