@@ -28,6 +28,8 @@ fn translate_type(
             symbol::TypeDefinition::Data(_) => IlType::Addr,
             _ => panic!("unsupported type {}", t.pretty(ctx.tdt))
         },
+        Array(_, _) => IlType::Addr,
+        PartialArray(_, _) => IlType::Addr,
         ref t => panic!("unsupported type {}", t.pretty(ctx.tdt))
     }
 }
@@ -112,6 +114,111 @@ fn append_cases<T, U: FnMut (&T, &mut IlGenContext, &mut BasicBlock, &mut FlowGr
     for branch_end in branch_ends {
         g.blocks.get_mut(&branch_end).unwrap().successor = Some(block.id);
     };
+}
+
+fn append_index_calc(
+    arr_expr: &ast::Expr,
+    ind_expr: &ast::Expr,
+    elem_size: u64,
+    ctx: &mut IlGenContext,
+    block: &mut BasicBlock,
+    g: &mut FlowGraph,
+    w: &mut Write
+) -> IlRegister {
+    fn unwrap_array_expr<'a>(
+        mut e: &'a ast::Expr,
+        is: &mut Vec<&'a ast::Expr>
+    ) -> &'a ast::Expr {
+        while let ast::ExprType::Index(ref arr_expr, ref ind_expr) = e.node {
+            is.push(ind_expr);
+            e = arr_expr;
+        };
+        e
+    }
+
+    let mut ind_exprs = vec![ind_expr];
+    let arr_reg = append_expr(unwrap_array_expr(arr_expr, &mut ind_exprs), ctx, block, g, w);
+
+    let mut ind_reg = append_expr(ind_exprs.last().unwrap(), ctx, block, g, w);
+    let mut size_mult = IlOperand::Const(IlConst::Int(1));
+
+    for (i, &ind_expr) in ind_exprs.iter().rev().skip(1).enumerate() {
+        let dim_ind = append_expr(ind_expr, ctx, block, g, w);
+        let next_size_addr = g.registers.alloc_temp(IlType::Addr);
+
+        block.instrs.push(IlInstruction::AddAddr(
+            next_size_addr,
+            IlOperand::Register(arr_reg),
+            IlOperand::Const(IlConst::Addr(i as u64 * IlType::Int.size()))
+        ));
+
+        let next_size = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::LoadInt(
+            next_size,
+            IlOperand::Register(next_size_addr)
+        ));
+
+        let next_size_mult = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::MulInt(
+            next_size_mult,
+            size_mult,
+            IlOperand::Register(next_size)
+        ));
+
+        let dim_ind_mult = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::MulInt(
+            dim_ind_mult,
+            IlOperand::Register(dim_ind),
+            IlOperand::Register(next_size_mult)
+        ));
+
+        let next_ind = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::AddInt(
+            next_ind,
+            IlOperand::Register(ind_reg),
+            IlOperand::Register(dim_ind_mult)
+        ));
+
+        size_mult = IlOperand::Register(next_size_mult);
+        ind_reg = next_ind;
+    };
+
+    let ind_as_addr = g.registers.alloc_temp(IlType::Addr);
+
+    block.instrs.push(IlInstruction::Int2Addr(
+        ind_as_addr,
+        IlOperand::Register(ind_reg)
+    ));
+
+    let off_reg = g.registers.alloc_temp(IlType::Addr);
+
+    block.instrs.push(IlInstruction::MulAddr(
+        off_reg,
+        IlOperand::Register(ind_as_addr),
+        IlOperand::Const(IlConst::Addr(elem_size))
+    ));
+
+    let total_off_reg = g.registers.alloc_temp(IlType::Addr);
+
+    block.instrs.push(IlInstruction::AddAddr(
+        total_off_reg,
+        IlOperand::Register(off_reg),
+        IlOperand::Const(IlConst::Addr(IlType::Int.size() * ind_exprs.len() as u64))
+    ));
+
+    let addr_reg = g.registers.alloc_temp(IlType::Addr);
+
+    block.instrs.push(IlInstruction::AddAddr(
+        addr_reg,
+        IlOperand::Register(arr_reg),
+        IlOperand::Register(total_off_reg)
+    ));
+
+    addr_reg
 }
 
 fn append_expr_to(
@@ -239,6 +346,20 @@ fn append_expr_to(
                 op => panic!("not yet supported: {:?}", op)
             }
         },
+        Size(ref val, dims) => {
+            let val = IlOperand::Register(append_expr(val, ctx, block, g, w));
+            let addr = g.registers.alloc_temp(IlType::Addr);
+
+            block.instrs.push(IlInstruction::AddAddr(
+                addr,
+                val,
+                IlOperand::Const(IlConst::Addr(dims as u64 * IlType::Int.size()))
+            ));
+            block.instrs.push(IlInstruction::LoadInt(
+                target,
+                IlOperand::Register(addr)
+            ));
+        },
         Id(_, sym_id) => {
             let sym = ctx.sdt.get_symbol(sym_id);
 
@@ -264,6 +385,32 @@ fn append_expr_to(
             block.instrs.push(IlInstruction::CallDirect(target, func, args));
         },
         Call(_, _) => panic!("indirect calls are not yet supported"),
+        Index(ref arr, ref ind) => {
+            let addr_reg = append_index_calc(
+                arr,
+                ind,
+                translate_type(&expr.val_type, ctx).size(),
+                ctx,
+                block,
+                g,
+                w
+            );
+
+            block.instrs.push(match translate_type(&expr.val_type, ctx) {
+                IlType::Int => IlInstruction::LoadInt(
+                    target,
+                    IlOperand::Register(addr_reg)
+                ),
+                IlType::Float => IlInstruction::LoadFloat(
+                    target,
+                    IlOperand::Register(addr_reg)
+                ),
+                IlType::Addr => IlInstruction::LoadAddr(
+                    target,
+                    IlOperand::Register(addr_reg)
+                )
+            });
+        },
         Cons(_, ref args, ctor_id) => {
             let types: Vec<_> = args.iter().map(|a| translate_type(&a.val_type, ctx)).collect();
 
@@ -342,8 +489,7 @@ fn append_expr_to(
                 g,
                 w
             );
-        },
-        ref n => panic!("not yet supported: {:?}", n)
+        }
     };
 
     target
@@ -398,7 +544,33 @@ fn append_store_to_expr(
                 _ => panic!("store to invalid symbol {}", sym_id)
             }
         },
-        ref n => panic!("not yet supported: {:?}", n)
+        Index(ref arr, ref ind) => {
+            let addr_reg = append_index_calc(
+                arr,
+                ind,
+                translate_type(&expr.val_type, ctx).size(),
+                ctx,
+                block,
+                g,
+                w
+            );
+
+            block.instrs.push(match translate_type(&expr.val_type, ctx) {
+                IlType::Int => IlInstruction::StoreInt(
+                    IlOperand::Register(addr_reg),
+                    IlOperand::Register(source)
+                ),
+                IlType::Float => IlInstruction::StoreFloat(
+                    IlOperand::Register(addr_reg),
+                    IlOperand::Register(source)
+                ),
+                IlType::Addr => IlInstruction::StoreAddr(
+                    IlOperand::Register(addr_reg),
+                    IlOperand::Register(source)
+                )
+            });
+        },
+        ref n => panic!("not supported as lvalue: {:?}", n)
     }
 }
 
@@ -519,6 +691,46 @@ fn append_stmt(
     }
 }
 
+fn append_size_calc(
+    dims: &[IlRegister],
+    val_type: IlType,
+    ctx: &mut IlGenContext,
+    block: &mut BasicBlock,
+    g: &mut FlowGraph,
+    w: &mut Write
+) -> IlRegister {
+    let mut num_reg = dims[0];
+
+    for &d in dims.iter().skip(1) {
+        let next_reg = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::MulInt(
+            next_reg,
+            IlOperand::Register(num_reg),
+            IlOperand::Register(d)
+        ));
+        num_reg = next_reg;
+    };
+
+    let size_reg = g.registers.alloc_temp(IlType::Int);
+
+    block.instrs.push(IlInstruction::MulInt(
+        size_reg,
+        IlOperand::Register(num_reg),
+        IlOperand::Const(IlConst::Int(val_type.size() as i32))
+    ));
+
+    let size_with_overhead_reg = g.registers.alloc_temp(IlType::Addr);
+
+    block.instrs.push(IlInstruction::AddInt(
+        size_with_overhead_reg,
+        IlOperand::Register(size_reg),
+        IlOperand::Const(IlConst::Int(IlType::Int.size() as i32 * dims.len() as i32))
+    ));
+
+    size_with_overhead_reg
+}
+
 fn append_block(
     ast_block: &ast::Block,
     ctx: &mut IlGenContext,
@@ -526,13 +738,72 @@ fn append_block(
     g: &mut FlowGraph,
     w: &mut Write
 ) -> () {
-    // TODO Allocate arrays
+    let mut total_size_reg = None;
+    for (_, &sym_id) in ast_block.symbols.borrow().symbol_names.iter() {
+        let sym = ctx.sdt.get_symbol(sym_id);
+        match sym {
+            symbol::Symbol { node: symbol::SymbolType::Var(ref vsym), .. } if vsym.dims.borrow().len() > 0 => {
+                let sizes: Vec<_> = vsym.dims.borrow().iter()
+                    .map(|d| append_expr(d, ctx, block, g, w))
+                    .collect();
+                let size_reg = append_size_calc(
+                    &sizes[..],
+                    translate_type(if let symbol::Type::Array(ref inner_type, _) = vsym.val_type {
+                        inner_type
+                    } else {
+                        unreachable!()
+                    }, ctx),
+                    ctx,
+                    block,
+                    g,
+                    w
+                );
+
+                let reg = g.registers.get_or_alloc_local(ctx.func_id, sym, IlType::Addr);
+                block.instrs.push(IlInstruction::AllocStack(
+                    reg,
+                    IlOperand::Register(size_reg)
+                ));
+
+                for (i, &size) in sizes.iter().enumerate() {
+                    let i = i as u64;
+                    let addr_reg = g.registers.alloc_temp(IlType::Addr);
+
+                    block.instrs.push(IlInstruction::AddAddr(
+                        addr_reg,
+                        IlOperand::Register(reg),
+                        IlOperand::Const(IlConst::Addr(IlType::Int.size() * i))
+                    ));
+                    block.instrs.push(IlInstruction::StoreInt(
+                        IlOperand::Register(addr_reg),
+                        IlOperand::Register(size)
+                    ));
+                };
+
+                if let Some(old_total_size_reg) = total_size_reg {
+                    let next_reg = g.registers.alloc_temp(IlType::Int);
+
+                    block.instrs.push(IlInstruction::AddInt(
+                        next_reg,
+                        IlOperand::Register(old_total_size_reg),
+                        IlOperand::Register(size_reg)
+                    ));
+                    total_size_reg = Some(next_reg);
+                } else {
+                    total_size_reg = Some(size_reg);
+                };
+            },
+            _ => {}
+        };
+    };
 
     for stmt in &ast_block.stmts {
         append_stmt(stmt, ctx, block, g, w);
     };
 
-    // TODO Deallocate arrays
+    if let Some(total_size_reg) = total_size_reg {
+        block.instrs.push(IlInstruction::FreeStack(IlOperand::Register(total_size_reg)));
+    };
 }
 
 fn generate_function_il(

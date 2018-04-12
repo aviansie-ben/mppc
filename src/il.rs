@@ -183,7 +183,10 @@ pub enum IlInstruction {
     LeFloat(IlRegister, IlOperand, IlOperand),
     GeFloat(IlRegister, IlOperand, IlOperand),
 
+    Int2Addr(IlRegister, IlOperand),
+
     AllocStack(IlRegister, IlOperand),
+    FreeStack(IlOperand),
     AllocHeap(IlRegister, IlOperand),
 
     LoadInt(IlRegister, IlOperand),
@@ -317,7 +320,9 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            Int2Addr(_, ref mut o) => f(o),
             AllocStack(_, ref mut o) => f(o),
+            FreeStack(ref mut o) => f(o),
             AllocHeap(_, ref mut o) => f(o),
             LoadInt(_, ref mut o) => f(o),
             LoadFloat(_, ref mut o) => f(o),
@@ -437,7 +442,9 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            Int2Addr(_, ref o) => f(o),
             AllocStack(_, ref o) => f(o),
+            FreeStack(ref o) => f(o),
             AllocHeap(_, ref o) => f(o),
             LoadInt(_, ref o) => f(o),
             LoadFloat(_, ref o) => f(o),
@@ -495,7 +502,9 @@ impl IlInstruction {
             GtFloat(r, _, _) => Some(r),
             LeFloat(r, _, _) => Some(r),
             GeFloat(r, _, _) => Some(r),
+            Int2Addr(r, _) => Some(r),
             AllocStack(r, _) => Some(r),
+            FreeStack(_) => None,
             AllocHeap(r, _) => Some(r),
             LoadInt(r, _) => Some(r),
             LoadFloat(r, _) => Some(r),
@@ -541,6 +550,7 @@ impl IlInstruction {
             GtFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             LeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             GeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
+            Int2Addr(ref mut old_target, _) => mem::replace(old_target, target),
             AllocStack(ref mut old_target, _) => mem::replace(old_target, target),
             AllocHeap(ref mut old_target, _) => mem::replace(old_target, target),
             LoadInt(ref mut old_target, _) => mem::replace(old_target, target),
@@ -564,6 +574,9 @@ impl IlInstruction {
             StoreInt(_, _) => true,
             StoreFloat(_, _) => true,
             StoreAddr(_, _) => true,
+            AllocStack(_, _) => true,
+            FreeStack(_) => true,
+            AllocHeap(_, _) => true,
             PrintInt(_) => true,
             PrintBool(_) => true,
             PrintChar(_) => true,
@@ -615,7 +628,9 @@ impl fmt::Display for IlInstruction {
             GtFloat(ref reg, ref lhs, ref rhs) => write!(f, "gt.f64 {} {} {}", reg, lhs, rhs),
             LeFloat(ref reg, ref lhs, ref rhs) => write!(f, "le.f64 {} {} {}", reg, lhs, rhs),
             GeFloat(ref reg, ref lhs, ref rhs) => write!(f, "ge.f64 {} {} {}", reg, lhs, rhs),
+            Int2Addr(ref reg, ref val) => write!(f, "cvt_a.i32 {} {}", reg, val),
             AllocStack(ref reg, ref size) => write!(f, "alloc_stack {} {}", reg, size),
+            FreeStack(ref size) => write!(f, "free_stack {}", size),
             AllocHeap(ref reg, ref size) => write!(f, "alloc_heap {} {}", reg, size),
             LoadInt(ref reg, ref addr) => write!(f, "ld.i32 {} {}", reg, addr),
             LoadFloat(ref reg, ref addr) => write!(f, "ld.f64 {} {}", reg, addr),

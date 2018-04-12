@@ -58,6 +58,14 @@ pub fn follow<'a, T: Eq + Hash>(m: &'a HashMap<T, T>, v: &'a T) -> &'a T {
     }
 }
 
+pub fn follow_option<'a, T: Eq + Hash>(m: &'a HashMap<T, Option<T>>, v: &'a T) -> Option<&'a T> {
+    match m.get(v) {
+        Some(&None) => None,
+        Some(&Some(ref next)) => follow_option(m, next),
+        None => Some(v)
+    }
+}
+
 pub trait PrettyDisplay where Self: Sized {
     fn fmt(&self, indent: &str, f: &mut fmt::Formatter) -> fmt::Result;
 

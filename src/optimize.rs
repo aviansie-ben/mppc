@@ -289,6 +289,14 @@ fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlOperand
         DivInt(reg, Register(r), Const(Int(1))) => Some((reg, Register(r))),
         DivInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
         LogicNotInt(reg, Const(Int(r))) => Some((reg, Const(Int((r == 0) as i32)))),
+        AddAddr(reg, Const(Addr(r)), Const(Addr(l))) => Some((reg, Const(Addr(r + l)))),
+        AddAddr(reg, Register(r), Const(Addr(0))) => Some((reg, Register(r))),
+        AddAddr(reg, Const(Addr(0)), Register(l)) => Some((reg, Register(l))),
+        MulAddr(reg, Const(Addr(r)), Const(Addr(l))) => Some((reg, Const(Addr(r * l)))),
+        MulAddr(reg, Register(r), Const(Addr(1))) => Some((reg, Register(r))),
+        MulAddr(reg, Const(Addr(1)), Register(l)) => Some((reg, Register(l))),
+        MulAddr(reg, Register(_), Const(Addr(0))) => Some((reg, Const(Addr(0)))),
+        MulAddr(reg, Const(Addr(0)), Register(_)) => Some((reg, Const(Addr(0)))),
         EqInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r == l) as i32)))),
         EqInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
         LtInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r < l) as i32)))),
@@ -299,6 +307,7 @@ fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlOperand
         LeInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
         GeInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r >= l) as i32)))),
         GeInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
+        Int2Addr(reg, Const(Int(v))) => Some((reg, Const(Addr(v as u64)))),
         _ => None
     }
 }
