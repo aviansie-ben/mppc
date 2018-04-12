@@ -18,6 +18,11 @@ fn precompute_liveness(
     // Find the set of registers whose values are used in this block before being assigned (gen) and
     // whose values are set before being used (kill).
     for i in block.instrs.iter().rev() {
+        match *i {
+            IlInstruction::Copy(l, IlOperand::Register(r)) if l == r => continue,
+            _ => {}
+        };
+
         if let Some(reg) = i.target_register() {
             writeln!(w, "@{} - overwriting {}", block.id, reg).unwrap();
             gen.remove(&reg);
@@ -218,6 +223,18 @@ fn do_dead_store_elimination(
         // Look through instructions in reverse order, since liveness information propagates
         // backwards through a basic block.
         for i in b.instrs.iter_mut().rev() {
+            match *i {
+                IlInstruction::Copy(l, IlOperand::Register(r)) if l == r => {
+                    writeln!(w, "@{} - eliminating {}", b.id, i).unwrap();
+
+                    mem::replace(i, IlInstruction::Nop);
+                    num_eliminated += 1;
+
+                    continue;
+                },
+                _ => {}
+            };
+
             if let Some(reg) = i.target_register() {
                 // If the register written by this instruction is dead at this point *and* the
                 // instruction has no side effects (we can't remove dead input instructions since
