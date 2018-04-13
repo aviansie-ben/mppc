@@ -217,12 +217,18 @@ fn do_dead_store_elimination(
     writeln!(w, "========== DEAD STORE ELIMINATION ==========\n").unwrap();
 
     let mut num_eliminated: u32 = 0;
-    for (_, b) in &mut g.blocks {
-        let mut live_vars = l[&b.id].clone();
+    let mut live_vars = HashSet::new();
+    let mut elidable_copies = vec![];
+    let mut elided_copies = vec![];
+
+    for (_, b) in g.blocks.iter_mut() {
+        live_vars.clone_from(&l[&b.id]);
+        elidable_copies.clear();
+        elided_copies.clear();
 
         // Look through instructions in reverse order, since liveness information propagates
         // backwards through a basic block.
-        for i in b.instrs.iter_mut().rev() {
+        for (n, i) in b.instrs.iter_mut().enumerate().rev() {
             match *i {
                 IlInstruction::Copy(l, IlOperand::Register(r)) if l == r => {
                     writeln!(w, "@{} - eliminating {}", b.id, i).unwrap();
@@ -235,7 +241,7 @@ fn do_dead_store_elimination(
                 _ => {}
             };
 
-            if let Some(reg) = i.target_register() {
+            if let Some(mut reg) = i.target_register() {
                 // If the register written by this instruction is dead at this point *and* the
                 // instruction has no side effects (we can't remove dead input instructions since
                 // that would change how prompts for values from the user work).
@@ -246,6 +252,31 @@ fn do_dead_store_elimination(
                     num_eliminated += 1;
 
                     continue;
+                };
+
+                // If the register written by this instruction will be copied to another register
+                // and will not be used directly after that, we can simply write directly to the
+                // register it will be copied to instead.
+                while let Some(&(_, new_reg, n_copy)) = elidable_copies.iter().find(|&&(r, _, _)| r == reg) {
+                    writeln!(w, "@{} - eliding copy for {} to {}", b.id, i, new_reg).unwrap();
+
+                    live_vars.remove(&reg);
+                    i.relink_target(new_reg);
+
+                    elided_copies.push(n_copy);
+                    reg = new_reg;
+                };
+
+                elidable_copies.retain(|&(old_reg, new_reg, _)| old_reg != reg && new_reg != reg);
+
+                match *i {
+                    IlInstruction::Copy(l, IlOperand::Register(r))
+                    if !live_vars.contains(&r) && live_vars.contains(&l) => {
+                        writeln!(w, "@{} - found potentially elidable {}", b.id, i).unwrap();
+
+                        elidable_copies.push((r, l, n));
+                    },
+                    _ => {}
                 };
 
                 // Update the liveness information to reflect the fact that the target register is
@@ -270,6 +301,11 @@ fn do_dead_store_elimination(
                     live_vars.insert(*reg);
                 }
             });
+        };
+
+        // Replace any elided copies by no-ops.
+        for &n in elided_copies.iter() {
+            mem::replace(&mut b.instrs[n], IlInstruction::Nop);
         };
 
         // Remove any no-ops injected into the instruction stream by eliminated instructions. These
