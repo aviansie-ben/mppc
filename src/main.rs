@@ -1,6 +1,7 @@
 #![feature(box_patterns)]
 #![feature(match_default_bindings)]
 #![feature(plugin)]
+#![feature(slice_patterns)]
 #![feature(vec_remove_item)]
 #![plugin(plex)]
 
@@ -66,8 +67,8 @@ macro_rules! optimizer_flag {
 
 static OPTIMIZER_LEVELS: [&[&'static str]; 3] = [
     &[],
-    &["const", "dead-store", "dead-code"],
-    &["const", "dead-store", "dead-code"]
+    &["const", "dead-store", "dead-code", "tail-call"],
+    &["const", "dead-store", "dead-code", "tail-call"]
 ];
 
 fn get_optimizations<'a>(matches: &ArgMatches<'a>) -> HashSet<&'static str> {
@@ -77,7 +78,7 @@ fn get_optimizations<'a>(matches: &ArgMatches<'a>) -> HashSet<&'static str> {
         optimizations.insert(opt);
     }
 
-    for opt in ["const", "dead-store", "dead-code"].into_iter() {
+    for opt in ["const", "dead-store", "dead-code", "tail-call"].into_iter() {
         if matches.occurrences_of(&format!("opt-{}-on", opt)) != 0 {
             optimizations.insert(opt);
         } else if matches.occurrences_of(&format!("opt-{}-off", opt)) != 0 {
@@ -148,6 +149,7 @@ fn parse_args<'a>() -> ArgMatches<'a> {
             .args(&optimizer_flag!("const", "constant folding and propagation"))
             .args(&optimizer_flag!("dead-store", "dead store removal"))
             .args(&optimizer_flag!("dead-code", "dead code removal"))
+            .args(&optimizer_flag!("tail-call", "tail call optimization"))
         )
         .get_matches()
 }

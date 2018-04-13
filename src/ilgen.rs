@@ -808,6 +808,7 @@ fn append_block(
 
 fn generate_function_il(
     func: &ast::Block,
+    args: Option<&[usize]>,
     ctx: &mut IlGenContext,
     w: &mut Write
 ) -> FlowGraph {
@@ -818,6 +819,18 @@ fn generate_function_il(
         writeln!(w, "========== GENERATING IL FOR MAIN BLOCK ==========\n").unwrap();
     } else {
         writeln!(w, "========== GENERATING IL FOR FUNCTION #{} ==========\n", ctx.func_id).unwrap();
+    };
+
+    if let Some(args) = args {
+        g.registers.args = args.iter().map(|&sym_id| {
+            let sym = ctx.sdt.get_symbol(sym_id);
+
+            g.registers.get_or_alloc_local(
+                ctx.func_id,
+                sym,
+                translate_type(&sym.val_type(), ctx)
+            )
+        }).collect();
     };
 
     append_block(func, ctx, &mut b, &mut g, w);
@@ -832,13 +845,13 @@ pub fn generate_il(program: &ast::Program, w: &mut Write) -> Program {
     writeln!(w, "========== IL GENERATION ==========\n").unwrap();
 
     Program {
-        main_block: generate_function_il(&program.block, &mut IlGenContext {
+        main_block: generate_function_il(&program.block, None, &mut IlGenContext {
             func_id: !0,
             tdt: &program.types,
             sdt: &program.symbols
         }, w),
         funcs: program.symbols.iter().filter_map(|(_, sym)| if let symbol::SymbolType::Fun(ref f) = sym.node {
-            Some((sym.id, generate_function_il(&f.body.borrow(), &mut IlGenContext {
+            Some((sym.id, generate_function_il(&f.body.borrow(), Some(&f.params), &mut IlGenContext {
                 func_id: sym.id,
                 tdt: &program.types,
                 sdt: &program.symbols

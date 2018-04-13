@@ -700,6 +700,7 @@ pub struct RegisterMeta {
 }
 
 pub struct RegisterAlloc {
+    pub args: Vec<IlRegister>,
     pub locals: HashMap<usize, IlRegister>,
     pub reg_meta: HashMap<IlRegister, RegisterMeta>,
     next_reg: usize
@@ -708,6 +709,7 @@ pub struct RegisterAlloc {
 impl RegisterAlloc {
     pub fn new() -> RegisterAlloc {
         RegisterAlloc {
+            args: vec![],
             locals: HashMap::new(),
             reg_meta: HashMap::new(),
             next_reg: 0
@@ -805,6 +807,14 @@ impl fmt::Display for FlowGraph {
                 IlRegisterType::Global => {
                     write!(f, "\n.global #{} {} {}", reg_meta.sym_id.unwrap(), reg, reg_meta.val_type)?;
                 }
+            };
+        };
+
+        if self.registers.args.len() > 0 {
+            write!(f, "\n.args")?;
+
+            for a in self.registers.args.iter() {
+                write!(f, " {}", a)?;
             };
         };
 

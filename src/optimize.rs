@@ -724,7 +724,101 @@ fn do_empty_block_elision(
     empty_blocks.len()
 }
 
+fn do_tail_call_optimization(
+    func_id: usize,
+    g: &mut FlowGraph,
+    w: &mut Write
+) -> u32 {
+    writeln!(w, "========== TAIL CALL OPTIMIZATION ==========\n").unwrap();
+
+    let mut num_optimized: u32 = 0;
+    let mut ret_blocks = vec![];
+
+    // Look for any blocks that have only a return statement. Any block that jumps to this block
+    // might contain a tail call that could be optimized.
+    for (_, b) in g.blocks.iter() {
+        match b.instrs[..] {
+            [IlInstruction::Return(IlOperand::Register(r))] => {
+                writeln!(w, "@{} - found block with only return of {}", b.id, r).unwrap();
+                ret_blocks.push((b.id, r));
+            },
+            _ => {}
+        }
+    };
+
+    // Look for any blocks that end with a recursive call, followed by immediately returning the
+    // result of that call. These can be optimized as jumps back to the beginning of the function.
+    for (_, b) in g.blocks.iter_mut() {
+        if b.instrs.len() < 2 { continue; };
+
+        let len = b.instrs.len();
+        let (args, remove_range) = if len >= 2 {
+            match b.instrs[(len - 2)..] {
+                [
+                    IlInstruction::CallDirect(r1, f, ref mut args),
+                    IlInstruction::Return(IlOperand::Register(r2))
+                ] if r1 == r2 && f == func_id => {
+                    (mem::replace(args, vec![]), (len - 2)..)
+                },
+                [
+                    _,
+                    IlInstruction::CallDirect(r, f, ref mut args)
+                ] if b.successor.map_or(false, |s| ret_blocks.contains(&(s, r))) && f == func_id => {
+                    (mem::replace(args, vec![]), (len - 1)..)
+                },
+                _ => continue
+            }
+        } else if b.instrs.len() == 1 {
+            match b.instrs[0] {
+                IlInstruction::CallDirect(r, f, ref mut args)
+                    if b.successor.map_or(false, |s| ret_blocks.contains(&(s, r))) && f == func_id => {
+                    (mem::replace(args, vec![]), 0..)
+                },
+                _ => continue
+            }
+        } else {
+            continue;
+        };
+
+        writeln!(w, "@{} - eliminating self-recursive tail call", b.id).unwrap();
+
+        b.instrs.drain(remove_range);
+
+        let tmp_regs: Vec<_> = {
+            let registers = &mut g.registers;
+            args.into_iter().enumerate().map(|(i, from)| {
+                let to = registers.args[i];
+                let val_type = registers.reg_meta[&to].val_type;
+
+                let tmp_reg = registers.alloc_temp(val_type);
+
+                b.instrs.push(IlInstruction::Copy(
+                    tmp_reg,
+                    from
+                ));
+                tmp_reg
+            }).collect()
+        };
+
+        for (tmp, &to) in tmp_regs.into_iter().zip(g.registers.args.iter()) {
+            b.instrs.push(IlInstruction::Copy(
+                to,
+                IlOperand::Register(tmp)
+            ));
+        };
+
+        b.successor = Some(g.start_block);
+
+        num_optimized += 1;
+    };
+
+    writeln!(w).unwrap();
+
+    num_optimized
+}
+
 fn optimize_function(
+    func_id: usize,
     g: &mut FlowGraph,
     ipa: &HashMap<usize, IpaStats>,
     w: &mut Write,
@@ -755,6 +849,10 @@ fn optimize_function(
             do_dead_block_elimination(g, w);
         };
 
+        if optimizations.contains("tail-call") {
+            updated = do_tail_call_optimization(func_id, g, w) != 0 || updated;
+        };
+
         writeln!(w, "========== CURRENT IL ==========").unwrap();
         writeln!(w, "{}", g).unwrap();
 
@@ -766,10 +864,10 @@ fn optimize_function(
 
 pub fn optimize_il(program: &mut Program, w: &mut Write, optimizations: &HashSet<&'static str>) {
     perform_ipa(program, w);
-    optimize_function(&mut program.main_block, &program.ipa, w, optimizations);
+    optimize_function(!0, &mut program.main_block, &program.ipa, w, optimizations);
 
-    for &mut (_, ref mut g) in &mut program.funcs {
-        optimize_function(g, &program.ipa, w, optimizations);
+    for &mut (func_id, ref mut g) in &mut program.funcs {
+        optimize_function(func_id, g, &program.ipa, w, optimizations);
     };
 }
 
