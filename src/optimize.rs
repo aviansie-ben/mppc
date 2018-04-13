@@ -538,7 +538,8 @@ fn do_global_propagation(
     g: &FlowGraph,
     w: &mut Write,
     output: &mut HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>,
-    assigns: &HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>
+    assigns: &HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>,
+    ext_regs: &Vec<IlRegister>
 ) {
     writeln!(w, "========== GLOBAL PROPAGATION ==========\n").unwrap();
 
@@ -552,6 +553,16 @@ fn do_global_propagation(
 
     for (_, ref mut consts) in output.iter_mut() {
         consts.clear();
+    };
+
+    // Make sure that argument and nonlocal registers are marked as having unknown values in the
+    // starting block.
+    {
+        let output = output.entry(g.start_block).or_insert_with(HashMap::new);
+
+        for &reg in ext_regs.iter() {
+            output.insert(reg, None);
+        };
     };
 
     // Repeatedly propagate known values forward through the CFG until all blocks are consistent.
@@ -582,7 +593,7 @@ fn do_global_propagation(
                 };
             };
             writeln!(w).unwrap();
-        }
+        };
     };
 
     writeln!(w).unwrap();
@@ -593,6 +604,15 @@ fn do_propagation(g: &mut FlowGraph, ipa: &HashMap<usize, IpaStats>, w: &mut Wri
     let mut constants: HashMap<u32, HashMap<IlRegister, Option<IlOperand>>>
         = g.blocks.iter().map(|(id, _)| (*id, HashMap::new())).collect();
 
+    let ext_regs: Vec<_> = g.registers.reg_meta.iter().filter_map(|(&reg, reg_meta)| {
+        if reg_meta.reg_type.is_nonlocal() {
+            writeln!(w, "@end - implicitly using {} since it is nonlocal", reg).unwrap();
+            Some(reg)
+        } else {
+            None
+        }
+    }).chain(g.registers.args.iter().map(|&reg| reg)).collect();
+
     // Start with local constant folding and propagation so that we know the values assigned to each
     // variable in all basic blocks.
     do_constant_fold(g, ipa, w, &constants, &mut assigns);
@@ -600,7 +620,7 @@ fn do_propagation(g: &mut FlowGraph, ipa: &HashMap<usize, IpaStats>, w: &mut Wri
     // Perform global constant propagation followed by local constant folding and propagation until
     // no more constants are found to propagate.
     loop {
-        do_global_propagation(g, w, &mut constants, &assigns);
+        do_global_propagation(g, w, &mut constants, &assigns, &ext_regs);
         if do_constant_fold(g, ipa, w, &constants, &mut assigns) == 0 {
             break;
         };
