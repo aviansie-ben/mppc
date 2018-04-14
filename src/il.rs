@@ -142,6 +142,16 @@ pub enum IlOperand {
     Const(IlConst)
 }
 
+impl IlOperand {
+    pub fn get_type(&self, registers: &RegisterAlloc) -> IlType {
+        use il::IlOperand::*;
+        match *self {
+            Register(r) => registers.reg_meta[&r].val_type,
+            Const(ref c) => c.get_type()
+        }
+    }
+}
+
 impl fmt::Display for IlOperand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use il::IlOperand::*;
@@ -830,7 +840,8 @@ impl fmt::Display for FlowGraph {
 pub struct IpaStats {
     pub calls: HashSet<usize>,
     pub nonlocal_refs: HashSet<usize>,
-    pub nonlocal_writes: HashSet<usize>
+    pub nonlocal_writes: HashSet<usize>,
+    pub nonlocals_from: HashSet<usize>
 }
 
 impl IpaStats {
@@ -838,7 +849,8 @@ impl IpaStats {
         IpaStats {
             calls: HashSet::new(),
             nonlocal_refs: HashSet::new(),
-            nonlocal_writes: HashSet::new()
+            nonlocal_writes: HashSet::new(),
+            nonlocals_from: HashSet::new()
         }
     }
 }

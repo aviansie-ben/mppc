@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::mem;
 
-use il::{BasicBlock, FlowGraph, IlRegister, IlOperand, IlInstruction, IpaStats, Program, RegisterAlloc};
+use il::*;
 use util;
 
 fn precompute_liveness(
@@ -922,6 +922,13 @@ pub fn perform_ipa(program: &mut Program, w: &mut Write) {
                         writeln!(w, "  Found a write to nonlocal #{}", sym_id).unwrap();
                         stats.nonlocal_refs.insert(sym_id);
                         stats.nonlocal_writes.insert(sym_id);
+
+                        match reg_meta.reg_type {
+                            IlRegisterType::NonLocal(def_fun) => {
+                                stats.nonlocals_from.insert(def_fun);
+                            },
+                            _ => {}
+                        };
                     };
                 };
 
@@ -935,6 +942,13 @@ pub fn perform_ipa(program: &mut Program, w: &mut Write) {
 
                             writeln!(w, "  Found a read from nonlocal #{}", sym_id).unwrap();
                             stats.nonlocal_refs.insert(sym_id);
+
+                            match reg_meta.reg_type {
+                                IlRegisterType::NonLocal(def_fun) => {
+                                    stats.nonlocals_from.insert(def_fun);
+                                },
+                                _ => {}
+                            };
                         };
                     });
                 };
@@ -1008,6 +1022,10 @@ pub fn perform_ipa(program: &mut Program, w: &mut Write) {
 
             for &nonlocal_write in program.ipa[&called_id].nonlocal_writes.iter() {
                 ipa.nonlocal_writes.insert(nonlocal_write);
+            };
+
+            for &nonlocals_from in program.ipa[&called_id].nonlocals_from.iter() {
+                ipa.nonlocals_from.insert(nonlocals_from);
             };
         };
 

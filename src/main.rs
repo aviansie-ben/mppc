@@ -130,8 +130,8 @@ fn parse_args<'a>() -> ArgMatches<'a> {
                 .long("target")
                 .takes_value(true)
                 .value_name("TARGET ARCH")
-                .possible_values(&["stack", "il"])
-                .default_value("stack")
+                .possible_values(&["amd64", "il"])
+                .default_value("amd64")
                 .help("Sets the architecture to generate code for")
             )
             .arg(Arg::with_name("verbose")
@@ -249,7 +249,7 @@ fn analyze_command<'a>(args: &ArgMatches<'a>) {
     }
 }
 
-fn compile_stack_command<'a>(args: &ArgMatches<'a>) {
+fn compile_amd64_command<'a>(args: &ArgMatches<'a>) {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
@@ -272,14 +272,16 @@ fn compile_stack_command<'a>(args: &ArgMatches<'a>) {
 
     let mut tokens = create_lexer(&mut input);
     let mut errors: Vec<(String, lex::Span)> = Vec::new();
-    let parse_result = parse::parse_program(&mut tokens);
+    let mut parse_result = parse::parse_program(&mut tokens);
 
-    match &parse_result {
-        &Result::Err(ref err) => {
+    match parse_result {
+        Result::Err(ref err) => {
             errors.push(err.clone());
             tokens.drain_tokens();
         },
-        &Result::Ok(_) => {}
+        Result::Ok(ref mut program) => {
+            analysis::populate_symbol_tables(program, &mut errors);
+        }
     }
 
     tokens.finish(&mut errors);
@@ -289,8 +291,7 @@ fn compile_stack_command<'a>(args: &ArgMatches<'a>) {
         let mut p = ilgen::generate_il(parse_result.as_ref().unwrap(), debug_output.as_mut());
 
         optimize::optimize_il(&mut p, debug_output.as_mut(), &get_optimizations(args));
-
-        // TODO Stack codegen
+        codegen::amd64::emit_program(&p, &mut stdout.lock()).unwrap();
     }
 }
 
@@ -343,8 +344,8 @@ fn compile_il_command<'a>(args: &ArgMatches<'a>) {
 fn compile_command<'a>(args: &ArgMatches<'a>) {
     let target = args.value_of("target").unwrap();
 
-    if target == "stack" {
-        compile_stack_command(args);
+    if target == "amd64" {
+        compile_amd64_command(args);
     } else if target == "il" {
         compile_il_command(args);
     }
