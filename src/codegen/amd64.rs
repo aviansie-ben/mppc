@@ -702,7 +702,7 @@ fn emit_function(
         };
     };
 
-    let mut stack_space = -(registers.next_local + 8);
+    let mut stack_space = -(registers.next_local - 8);
 
     if stack_space % 16 != 0 {
         stack_space += 16 - stack_space % 16;
