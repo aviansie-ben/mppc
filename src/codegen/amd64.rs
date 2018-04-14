@@ -252,6 +252,7 @@ fn emit_instruction(
         DivInt(reg, ref o1, ref o2) => {
             emit_operand_read_i32(o1, "eax", registers, w)?;
             emit_operand_read_i32(o2, "ecx", registers, w)?;
+            writeln!(w, "cdq")?;
             writeln!(w, "idiv ecx")?;
             emit_register_write_i32(reg, "eax", registers, w)?;
         },
