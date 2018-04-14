@@ -1,0 +1,26 @@
+var x : int;
+
+fun f(y : int) : int {
+    var w : int;
+
+    fun g(z : int) : int {
+        return h(z) + y;
+    };
+
+    fun h(z : int) : int {
+        y := y * y;
+        return x + z;
+    };
+
+    fun f() : int {
+        return y;
+    };
+
+    x := 10;
+    y := g(y);
+
+    return g(y) + f();
+};
+
+print f(10);
+print x;
