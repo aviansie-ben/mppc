@@ -382,6 +382,11 @@ fn emit_instruction(
             emit_operand_read_i32(o, "eax", registers, w)?;
             emit_register_write_addr(reg, "rax", registers, w)?;
         },
+        Int2Float(reg, ref o) => {
+            emit_operand_read_i32(o, "eax", registers, w)?;
+            writeln!(w, "cvtsi2sd xmm0, eax")?;
+            emit_register_write_f64(reg, "xmm0", registers, w)?;
+        },
         AllocStack(reg, ref size) => {
             emit_operand_read_i32(size, "eax", registers, w)?;
             writeln!(w, "add rax, 23")?;

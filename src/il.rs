@@ -194,6 +194,7 @@ pub enum IlInstruction {
     GeFloat(IlRegister, IlOperand, IlOperand),
 
     Int2Addr(IlRegister, IlOperand),
+    Int2Float(IlRegister, IlOperand),
 
     AllocStack(IlRegister, IlOperand),
     FreeStack(IlOperand),
@@ -331,6 +332,7 @@ impl IlInstruction {
                 f(o2);
             },
             Int2Addr(_, ref mut o) => f(o),
+            Int2Float(_, ref mut o) => f(o),
             AllocStack(_, ref mut o) => f(o),
             FreeStack(ref mut o) => f(o),
             AllocHeap(_, ref mut o) => f(o),
@@ -453,6 +455,7 @@ impl IlInstruction {
                 f(o2);
             },
             Int2Addr(_, ref o) => f(o),
+            Int2Float(_, ref o) => f(o),
             AllocStack(_, ref o) => f(o),
             FreeStack(ref o) => f(o),
             AllocHeap(_, ref o) => f(o),
@@ -513,6 +516,7 @@ impl IlInstruction {
             LeFloat(r, _, _) => Some(r),
             GeFloat(r, _, _) => Some(r),
             Int2Addr(r, _) => Some(r),
+            Int2Float(r, _) => Some(r),
             AllocStack(r, _) => Some(r),
             FreeStack(_) => None,
             AllocHeap(r, _) => Some(r),
@@ -561,6 +565,7 @@ impl IlInstruction {
             LeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             GeFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             Int2Addr(ref mut old_target, _) => mem::replace(old_target, target),
+            Int2Float(ref mut old_target, _) => mem::replace(old_target, target),
             AllocStack(ref mut old_target, _) => mem::replace(old_target, target),
             AllocHeap(ref mut old_target, _) => mem::replace(old_target, target),
             LoadInt(ref mut old_target, _) => mem::replace(old_target, target),
@@ -639,6 +644,7 @@ impl fmt::Display for IlInstruction {
             LeFloat(ref reg, ref lhs, ref rhs) => write!(f, "le.f64 {} {} {}", reg, lhs, rhs),
             GeFloat(ref reg, ref lhs, ref rhs) => write!(f, "ge.f64 {} {} {}", reg, lhs, rhs),
             Int2Addr(ref reg, ref val) => write!(f, "cvt_a.i32 {} {}", reg, val),
+            Int2Float(ref reg, ref val) => write!(f, "cvt_f64.i32 {} {}", reg, val),
             AllocStack(ref reg, ref size) => write!(f, "alloc_stack {} {}", reg, size),
             FreeStack(ref size) => write!(f, "free_stack {}", size),
             AllocHeap(ref reg, ref size) => write!(f, "alloc_heap {} {}", reg, size),

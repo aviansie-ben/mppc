@@ -325,6 +325,7 @@ fn try_fold_constant(instr: &mut IlInstruction) -> Option<(IlRegister, IlOperand
         GeInt(reg, Const(Int(r)), Const(Int(l))) => Some((reg, Const(Int((r >= l) as i32)))),
         GeInt(reg, Register(r), Register(l)) if r == l => Some((reg, Const(Int(1)))),
         Int2Addr(reg, Const(Int(v))) => Some((reg, Const(Addr(v as u64)))),
+        Int2Float(reg, Const(Int(v))) => Some((reg, Const(Float(IlFloat::from_f64(v as f64))))),
         _ => None
     }
 }

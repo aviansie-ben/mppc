@@ -333,6 +333,7 @@ fn append_expr_to(
 
             match op {
                 UnaryOp::BoolNot => block.instrs.push(IlInstruction::LogicNotInt(target, val)),
+                UnaryOp::IntFloat => block.instrs.push(IlInstruction::Int2Float(target, val)),
                 UnaryOp::IntNeg => block.instrs.push(IlInstruction::MulInt(
                     target,
                     val,
