@@ -221,6 +221,9 @@ pub enum IlInstruction {
     ReadChar(IlRegister),
     ReadFloat(IlRegister),
 
+    AssertNonZero(IlOperand),
+    AssertZero(IlOperand),
+
     Nop
 }
 
@@ -364,6 +367,8 @@ impl IlInstruction {
             ReadBool(_) => {},
             ReadChar(_) => {},
             ReadFloat(_) => {},
+            AssertNonZero(ref mut o) => f(o),
+            AssertZero(ref mut o) => f(o),
             Nop => {}
         }
     }
@@ -489,6 +494,8 @@ impl IlInstruction {
             ReadBool(_) => {},
             ReadChar(_) => {},
             ReadFloat(_) => {},
+            AssertNonZero(ref o) => f(o),
+            AssertZero(ref o) => f(o),
             Nop => {}
         }
     }
@@ -543,6 +550,8 @@ impl IlInstruction {
             ReadBool(r) => Some(r),
             ReadChar(r) => Some(r),
             ReadFloat(r) => Some(r),
+            AssertNonZero(_) => None,
+            AssertZero(_) => None,
             Nop => None
         }
     }
@@ -611,6 +620,8 @@ impl IlInstruction {
             ReadBool(_) => true,
             ReadChar(_) => true,
             ReadFloat(_) => true,
+            AssertNonZero(_) => true,
+            AssertZero(_) => true,
             _ => false
         }
     }
@@ -675,6 +686,8 @@ impl fmt::Display for IlInstruction {
             ReadBool(ref reg) => write!(f, "read_b.i32 {}", reg),
             ReadChar(ref reg) => write!(f, "read_c.i32 {}", reg),
             ReadFloat(ref reg) => write!(f, "read.f64 {}", reg),
+            AssertNonZero(ref val) => write!(f, "assertnz {}", val),
+            AssertZero(ref val) => write!(f, "assertz {}", val),
             Nop => write!(f, "nop")
         }
     }

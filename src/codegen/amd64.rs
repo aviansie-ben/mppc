@@ -150,12 +150,12 @@ fn emit_instruction(
     match *i {
         JumpNonZero(ref o, block) => {
             emit_operand_read_i32(o, "eax", registers, w)?;
-            writeln!(w, "cmp eax, 0")?;
+            writeln!(w, "test eax, eax")?;
             writeln!(w, "jnz .L{}", block)?;
         },
         JumpZero(ref o, block) => {
             emit_operand_read_i32(o, "eax", registers, w)?;
-            writeln!(w, "cmp eax, 0")?;
+            writeln!(w, "test eax, eax")?;
             writeln!(w, "jz .L{}", block)?;
         },
         Return(ref o) => {
@@ -545,6 +545,20 @@ fn emit_instruction(
             writeln!(w, "jmp .L{}_{}_scanf", n.0, n.1)?;
             writeln!(w, ".L{}_{}_end:", n.0, n.1)?;
         },
+        AssertNonZero(ref val) => {
+            emit_operand_read_i32(val, "eax", registers, w)?;
+            writeln!(w, "test eax, eax")?;
+            writeln!(w, "jnz .L{}_{}_okay", n.0, n.1)?;
+            writeln!(w, "call abort")?;
+            writeln!(w, ".L{}_{}_okay:", n.0, n.1)?;
+        },
+        AssertZero(ref val) => {
+            emit_operand_read_i32(val, "eax", registers, w)?;
+            writeln!(w, "test eax, eax")?;
+            writeln!(w, "jz .L{}_{}_okay", n.0, n.1)?;
+            writeln!(w, "call abort")?;
+            writeln!(w, ".L{}_{}_okay:", n.0, n.1)?;
+        },
         Nop => {}
     };
 
@@ -734,6 +748,7 @@ pub fn emit_program(p: &Program, w: &mut Write) -> io::Result<()> {
     writeln!(w, "[extern malloc]")?;
     writeln!(w, "[extern ceil]")?;
     writeln!(w, "[extern floor]")?;
+    writeln!(w, "[extern abort]")?;
 
     registers.insert(!0, find_function_registers(&p.main_block, None));
 

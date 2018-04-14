@@ -140,9 +140,27 @@ fn append_index_calc(
     let arr_reg = append_expr(unwrap_array_expr(arr_expr, &mut ind_exprs), ctx, block, g, w);
 
     let mut ind_reg = append_expr(ind_exprs.last().unwrap(), ctx, block, g, w);
-    let mut size_mult = IlOperand::Const(IlConst::Int(1));
+    let size_reg = g.registers.alloc_temp(IlType::Int);
 
-    for (i, &ind_expr) in ind_exprs.iter().rev().skip(1).enumerate() {
+    {
+        let ind_valid = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::LoadInt(
+            size_reg,
+            IlOperand::Register(arr_reg)
+        ));
+        block.instrs.push(IlInstruction::LtInt(
+            ind_valid,
+            IlOperand::Register(ind_reg),
+            IlOperand::Register(size_reg)
+        ));
+        block.instrs.push(IlInstruction::AssertNonZero(IlOperand::Register(ind_valid)));
+    };
+
+
+    let mut size_mult = size_reg;
+
+    for (i, &ind_expr) in ind_exprs.iter().rev().enumerate().skip(1) {
         let dim_ind = append_expr(ind_expr, ctx, block, g, w);
         let next_size_addr = g.registers.alloc_temp(IlType::Addr);
 
@@ -159,11 +177,20 @@ fn append_index_calc(
             IlOperand::Register(next_size_addr)
         ));
 
+        let ind_valid = g.registers.alloc_temp(IlType::Int);
+
+        block.instrs.push(IlInstruction::LtInt(
+            ind_valid,
+            IlOperand::Register(dim_ind),
+            IlOperand::Register(next_size)
+        ));
+        block.instrs.push(IlInstruction::AssertNonZero(IlOperand::Register(ind_valid)));
+
         let next_size_mult = g.registers.alloc_temp(IlType::Int);
 
         block.instrs.push(IlInstruction::MulInt(
             next_size_mult,
-            size_mult,
+            IlOperand::Register(size_mult),
             IlOperand::Register(next_size)
         ));
 
@@ -172,7 +199,7 @@ fn append_index_calc(
         block.instrs.push(IlInstruction::MulInt(
             dim_ind_mult,
             IlOperand::Register(dim_ind),
-            IlOperand::Register(next_size_mult)
+            IlOperand::Register(size_mult)
         ));
 
         let next_ind = g.registers.alloc_temp(IlType::Int);
@@ -183,7 +210,7 @@ fn append_index_calc(
             IlOperand::Register(dim_ind_mult)
         ));
 
-        size_mult = IlOperand::Register(next_size_mult);
+        size_mult = next_size_mult;
         ind_reg = next_ind;
     };
 
