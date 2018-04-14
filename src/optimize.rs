@@ -1028,7 +1028,9 @@ pub fn perform_ipa(program: &mut Program, w: &mut Write) {
             };
 
             for &nonlocals_from in program.ipa[&called_id].nonlocals_from.iter() {
-                ipa.nonlocals_from.insert(nonlocals_from);
+                if nonlocals_from != func_id {
+                    ipa.nonlocals_from.insert(nonlocals_from);
+                };
             };
         };
 
@@ -1057,6 +1059,19 @@ pub fn perform_ipa(program: &mut Program, w: &mut Write) {
                 Result::Ok(())
             })
         ).unwrap();
+
+        if ipa.nonlocals_from.len() > 0 {
+            writeln!(
+                w,
+                "    takes nonlocals from{}",
+                util::DeferredDisplay(|f| {
+                    for &func_id in ipa.nonlocals_from.iter() {
+                        write!(f, " #{}", func_id)?;
+                    };
+                    Result::Ok(())
+                })
+            ).unwrap();
+        };
 
         program.ipa.insert(func_id, ipa);
     };

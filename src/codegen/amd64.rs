@@ -139,6 +139,7 @@ fn emit_register_write_addr(
 fn emit_instruction(
     i: &IlInstruction,
     n: (u32, usize),
+    func_id: usize,
     registers: &Registers,
     all_registers: &HashMap<usize, Registers>,
     w: &mut Write
@@ -195,7 +196,7 @@ fn emit_instruction(
             };
 
             for (&nl, &off) in other_registers.nonlocals.iter() {
-                if nl == n.1 {
+                if nl == func_id {
                     writeln!(w, "mov [rsp + {}], rbp", off - 16)?;
                 } else {
                     writeln!(w, "mov rdx, [rbp + {}]", registers.nonlocals[&nl])?;
@@ -569,6 +570,7 @@ fn emit_instruction(
 fn emit_basic_block(
     b: &BasicBlock,
     needs_jump: bool,
+    func_id: usize,
     registers: &Registers,
     all_registers: &HashMap<usize, Registers>,
     w: &mut Write
@@ -576,7 +578,7 @@ fn emit_basic_block(
     writeln!(w, ".L{}:", b.id)?;
 
     for (n_instr, i) in b.instrs.iter().enumerate() {
-        emit_instruction(i, (b.id, n_instr), registers, all_registers, w)?;
+        emit_instruction(i, (b.id, n_instr), func_id, registers, all_registers, w)?;
     };
 
     if needs_jump {
@@ -722,7 +724,7 @@ fn emit_function(
         let block = &g.blocks[&blocks[i]];
         let needs_jump = block.successor != blocks.get(i + 1).map(|&s| s);
 
-        emit_basic_block(block, needs_jump, registers, all_registers, w)?;
+        emit_basic_block(block, needs_jump, id, registers, all_registers, w)?;
     };
 
     writeln!(w, ".Lend:")?;
