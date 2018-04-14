@@ -718,12 +718,14 @@ fn do_empty_block_elision(
     let mut empty_blocks: HashMap<u32, u32> = HashMap::new();
 
     // Look for any empty blocks and mark them for removal.
-    for (_, b) in &g.blocks {
+    for (&i, b) in &g.blocks {
         if b.instrs.len() == 0 {
             if let Some(successor) = b.successor {
-                writeln!(w, "@{} - detected empty block, redirecting to @{}", b.id, successor).unwrap();
+                if successor != i {
+                    writeln!(w, "@{} - detected empty block, redirecting to @{}", b.id, successor).unwrap();
 
-                empty_blocks.insert(b.id, successor);
+                    empty_blocks.insert(b.id, successor);
+                };
             };
         };
     };
