@@ -167,8 +167,12 @@ fn emit_instruction(
         },
         CallDirect(reg, func, ref args) => {
             let other_registers = &all_registers[&func];
-            let stack_room: i64 = (args.len() + other_registers.nonlocals.len()) as i64 * 8;
+            let mut stack_room: i64 = (args.len() + other_registers.nonlocals.len()) as i64 * 8;
             let mut curr_off: i64 = 0;
+
+            if stack_room % 16 != 0 {
+                stack_room += 16 - stack_room % 16;
+            };
 
             writeln!(w, "sub rsp, {}", stack_room)?;
 
@@ -380,13 +384,15 @@ fn emit_instruction(
         },
         AllocStack(reg, ref size) => {
             emit_operand_read_i32(size, "eax", registers, w)?;
-            writeln!(w, "add rax, 8")?;
+            writeln!(w, "add rax, 23")?;
+            writeln!(w, "and rax, -16")?;
             writeln!(w, "sub rsp, rax")?;
             emit_register_write_addr(reg, "rsp", registers, w)?;
         },
         FreeStack(ref size) => {
             emit_operand_read_i32(size, "eax", registers, w)?;
-            writeln!(w, "add rax, 8")?;
+            writeln!(w, "add rax, 23")?;
+            writeln!(w, "and rax, -16")?;
             writeln!(w, "add rsp, rax")?;
         },
         AllocHeap(reg, ref size) => {
@@ -667,6 +673,12 @@ fn emit_function(
         };
     };
 
+    let mut stack_space = -(registers.next_local + 8);
+
+    if stack_space % 16 != 0 {
+        stack_space += 16 - stack_space % 16;
+    };
+
     if id == !0 {
         writeln!(w, "main:")?;
     } else {
@@ -674,7 +686,7 @@ fn emit_function(
     };
     writeln!(w, "push rbp")?;
     writeln!(w, "mov rbp, rsp")?;
-    writeln!(w, "sub rsp, {}", -(registers.next_local + 8))?;
+    writeln!(w, "sub rsp, {}", stack_space)?;
 
     for i in 0..blocks.len() {
         let block = &g.blocks[&blocks[i]];
