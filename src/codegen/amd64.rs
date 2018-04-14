@@ -298,6 +298,16 @@ fn emit_instruction(
             writeln!(w, "mul rcx")?;
             emit_register_write_addr(reg, "rax", registers, w)?;
         },
+        CeilFloat(reg, ref o) => {
+            emit_operand_read_f64(o, "xmm0", registers, w)?;
+            writeln!(w, "call ceil")?;
+            emit_register_write_f64(reg, "xmm0", registers, w)?;
+        },
+        FloorFloat(reg, ref o) => {
+            emit_operand_read_f64(o, "xmm0", registers, w)?;
+            writeln!(w, "call floor")?;
+            emit_register_write_f64(reg, "xmm0", registers, w)?;
+        },
         EqInt(reg, ref o1, ref o2) => {
             emit_operand_read_i32(o1, "eax", registers, w)?;
             emit_operand_read_i32(o2, "ecx", registers, w)?;
@@ -722,6 +732,8 @@ pub fn emit_program(p: &Program, w: &mut Write) -> io::Result<()> {
     writeln!(w, "[extern fgets]")?;
     writeln!(w, "[extern strcmp]")?;
     writeln!(w, "[extern malloc]")?;
+    writeln!(w, "[extern ceil]")?;
+    writeln!(w, "[extern floor]")?;
 
     registers.insert(!0, find_function_registers(&p.main_block, None));
 

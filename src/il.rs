@@ -182,6 +182,9 @@ pub enum IlInstruction {
     AddAddr(IlRegister, IlOperand, IlOperand),
     MulAddr(IlRegister, IlOperand, IlOperand),
 
+    CeilFloat(IlRegister, IlOperand),
+    FloorFloat(IlRegister, IlOperand),
+
     EqInt(IlRegister, IlOperand, IlOperand),
     LtInt(IlRegister, IlOperand, IlOperand),
     GtInt(IlRegister, IlOperand, IlOperand),
@@ -291,6 +294,8 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            CeilFloat(_, ref mut o) => f(o),
+            FloorFloat(_, ref mut o) => f(o),
             EqInt(_, ref mut o1, ref mut o2) => {
                 f(o1);
                 f(o2);
@@ -414,6 +419,8 @@ impl IlInstruction {
                 f(o1);
                 f(o2);
             },
+            CeilFloat(_, ref o) => f(o),
+            FloorFloat(_, ref o) => f(o),
             EqInt(_, ref o1, ref o2) => {
                 f(o1);
                 f(o2);
@@ -505,6 +512,8 @@ impl IlInstruction {
             DivFloat(r, _, _) => Some(r),
             AddAddr(r, _, _) => Some(r),
             MulAddr(r, _, _) => Some(r),
+            CeilFloat(r, _) => Some(r),
+            FloorFloat(r, _) => Some(r),
             EqInt(r, _, _) => Some(r),
             LtInt(r, _, _) => Some(r),
             GtInt(r, _, _) => Some(r),
@@ -554,6 +563,8 @@ impl IlInstruction {
             DivFloat(ref mut old_target, _, _) => mem::replace(old_target, target),
             AddAddr(ref mut old_target, _, _) => mem::replace(old_target, target),
             MulAddr(ref mut old_target, _, _) => mem::replace(old_target, target),
+            CeilFloat(ref mut old_target, _) => mem::replace(old_target, target),
+            FloorFloat(ref mut old_target, _) => mem::replace(old_target, target),
             EqInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             LtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
             GtInt(ref mut old_target, _, _) => mem::replace(old_target, target),
@@ -633,6 +644,8 @@ impl fmt::Display for IlInstruction {
             DivFloat(ref reg, ref lhs, ref rhs) => write!(f, "div.f64 {} {} {}", reg, lhs, rhs),
             AddAddr(ref reg, ref lhs, ref rhs) => write!(f, "add.a {} {} {}", reg, lhs, rhs),
             MulAddr(ref reg, ref lhs, ref rhs) => write!(f, "mul.a {} {} {}", reg, lhs, rhs),
+            CeilFloat(ref reg, ref val) => write!(f, "ceil.f64 {} {}", reg, val),
+            FloorFloat(ref reg, ref val) => write!(f, "floor.f64 {} {}", reg, val),
             EqInt(ref reg, ref lhs, ref rhs) => write!(f, "eq.i32 {} {} {}", reg, lhs, rhs),
             LtInt(ref reg, ref lhs, ref rhs) => write!(f, "lt.i32 {} {} {}", reg, lhs, rhs),
             GtInt(ref reg, ref lhs, ref rhs) => write!(f, "gt.i32 {} {} {}", reg, lhs, rhs),

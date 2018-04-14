@@ -339,12 +339,14 @@ fn append_expr_to(
                     val,
                     IlOperand::Const(IlConst::Int(-1))
                 )),
+                UnaryOp::RealFloor => block.instrs.push(IlInstruction::FloorFloat(target, val)),
+                UnaryOp::RealCeil => block.instrs.push(IlInstruction::CeilFloat(target, val)),
                 UnaryOp::RealNeg => block.instrs.push(IlInstruction::MulFloat(
                     target,
                     val,
                     IlOperand::Const(IlConst::Float(IlFloat::from_f64(-1.0)))
                 )),
-                op => panic!("not yet supported: {:?}", op)
+                UnaryOp::Unknown => unreachable!()
             }
         },
         Size(ref val, dims) => {
