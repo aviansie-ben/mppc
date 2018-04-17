@@ -864,6 +864,11 @@ fn generate_function_il(
     };
 
     append_block(func, ctx, &mut b, &mut g, w);
+
+    if ctx.func_id == !0 {
+        b.instrs.push(IlInstruction::Return(IlOperand::Const(IlConst::Int(0))));
+    };
+
     g.append_block(&mut b);
 
     writeln!(w, "\n========== GENERATED IL ==========\n{}", g).unwrap();
