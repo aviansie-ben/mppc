@@ -351,6 +351,26 @@ fn do_constant_fold(
         let assigns = assigns.entry(b.id).or_insert_with(HashMap::new);
         assigns.clear();
 
+        fn invalidate_reg(
+            r: IlRegister,
+            input: Option<&HashMap<IlRegister, Option<IlOperand>>>,
+            assigns: &mut HashMap<IlRegister, Option<IlOperand>>
+        ) {
+            for (_, val) in assigns.iter_mut() {
+                if *val == Some(IlOperand::Register(r)) {
+                    *val = None;
+                };
+            };
+
+            if let Some(input) = input {
+                for (&r2, val) in input {
+                    if *val == Some(IlOperand::Register(r)) {
+                        assigns.entry(r2).or_insert(None);
+                    };
+                };
+            };
+        }
+
         for i in &mut b.instrs {
             let old = i.clone();
 
@@ -373,6 +393,7 @@ fn do_constant_fold(
                 for &sym_id in ipa[&func_id].nonlocal_writes.iter() {
                     if let Some(&reg) = g.registers.locals.get(&sym_id) {
                         assigns.insert(reg, None);
+                        invalidate_reg(reg, input, assigns);
                     };
                 };
             };
@@ -385,26 +406,29 @@ fn do_constant_fold(
             if let Some((r, c)) = try_fold_constant(i) {
                 mem::replace(i, Copy(r, c.clone()));
                 assigns.insert(r, Some(c));
+                invalidate_reg(r, input, assigns);
             } else if let Copy(r, ref v) = *i {
                 assigns.insert(r, Some(v.clone()));
+                invalidate_reg(r, input, assigns);
             } else if let Some(r) = i.target_register() {
                 assigns.insert(r, None);
-            }
+                invalidate_reg(r, input, assigns);
+            };
 
             if old != *i {
                 writeln!(w, "@{} - {} => {}", b.id, old, i).unwrap();
                 num_substitutions += 1;
-            }
-        }
+            };
+        };
 
         for (r, v) in assigns {
             if let Some(v) = v {
                 writeln!(w, "@{} - {} <- {}", b.id, r, v).unwrap();
             } else {
                 writeln!(w, "@{} - {} <- ???", b.id, r).unwrap();
-            }
-        }
-    }
+            };
+        };
+    };
 
     writeln!(w).unwrap();
     num_substitutions
